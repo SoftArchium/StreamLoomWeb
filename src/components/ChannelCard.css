@@ -11,14 +11,31 @@
     border-color var(--duration-base) var(--ease-out);
   cursor: pointer;
   flex-shrink: 0;
+  will-change: transform;
 }
 
 .channel-card:hover,
-.channel-card:focus-visible {
-  transform: translateY(-4px) scale(1.02);
-  box-shadow: var(--shadow-card), var(--shadow-glow);
-  border-color: var(--border-hover);
-  outline: none;
+.channel-card:focus,
+.channel-card:focus-visible,
+.channel-card.focused {
+  transform: translateY(-6px) scale(1.04);
+  box-shadow: 0 16px 32px rgba(0, 0, 0, 0.5), 0 0 24px rgba(108, 92, 231, 0.45);
+  border-color: var(--accent-1);
+  outline: 3px solid rgba(108, 92, 231, 0.85);
+  outline-offset: 2px;
+  z-index: 10;
+}
+
+.channel-card:focus .channel-card__play-overlay,
+.channel-card:focus-visible .channel-card__play-overlay,
+.channel-card.focused .channel-card__play-overlay {
+  opacity: 1;
+}
+
+.channel-card:focus .channel-card__fav,
+.channel-card:focus-visible .channel-card__fav,
+.channel-card.focused .channel-card__fav {
+  opacity: 1;
 }
 
 .channel-card:active { transform: scale(0.98); }

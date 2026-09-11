@@ -34,8 +34,15 @@ export function ChannelCard({ channel, nowPlaying, size = 'medium', onWatch }: P
       className={`channel-card channel-card--${size} ${!hasStream ? 'channel-card--no-stream' : ''}`}
       onClick={handleClick}
       role={hasStream ? 'button' : undefined}
-      tabIndex={hasStream ? 0 : undefined}
-      onKeyDown={(e) => e.key === 'Enter' && handleClick()}
+      tabIndex={hasStream ? 0 : -1}
+      data-card="channel"
+      data-channel-id={channel.id}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          handleClick()
+        }
+      }}
       aria-label={`Play ${channel.name}`}
     >
       <div className="channel-card__thumb">

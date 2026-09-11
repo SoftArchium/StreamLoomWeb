@@ -1,8 +1,6 @@
 # StreamLoom Web
 
-**StreamLoom Web** is the browser-native Progressive Web App (PWA) companion to the [StreamLoom](https://github.com/SoftArchium/streamloom) Android/TV app. It brings the full live-TV & EPG experience to any modern browser — installable like a native app on desktop and mobile.
-
-🌐 **Live at:** https://streamloom.netlify.app
+**StreamLoom Web** is the high-performance browser-native Progressive Web App (PWA) companion to the [StreamLoom](https://github.com/SoftArchium/streamloom) Android/TV app. It brings the full live-TV & EPG experience to any modern browser — installable like a native app on desktop, mobile, and smart TVs.
 
 ---
 
@@ -10,16 +8,16 @@
 
 | Feature | Details |
 |---|---|
-| 📺 Live TV | Thousands of channels via HLS.js, with 5 Mbps fast-start and resilient retry logic |
-| 📅 TV Guide (EPG) | Full 24-hour timeline, scrolled to the current time, programme click-to-watch |
-| ❤️ Favourites | Pin any channel, persisted in localStorage |
+| 📺 Live TV | Thousands of channels via HLS.js, 5 Mbps fast-start buffer, resilient stream retries |
+| 📅 TV Guide (EPG) | Full timeline guide scrolled to current time, click-to-watch |
+| ❤️ Favourites | Pin channels with persistent local storage |
 | 🕘 Continue Watching | Auto-records recently watched channels |
-| 🔍 Search & Filters | Search by name/country, filter by category or country, favourites-only view |
-| 🎬 Video Player | Full controls: play/pause, mute, fullscreen, PiP, channel drawer, EPG overlay |
-| ⌨️ Keyboard Nav | Arrow keys for channel switch, Space play/pause, F fullscreen, M mute, Esc back |
-| 🌐 PWA | Install on any device, service worker caching, offline catalogue fallback |
-| ⚡ Performance | Cloudflare 1.1.1.1 DoH pre-connect, 1-hour LocalStorage catalogue cache |
-| ⚙️ Settings | DNS ping, low-latency mode toggle, cache management, shortcut reference |
+| 🎯 Mobile Filter Parity | Priority categories (Music 🎵, Movies 🎬, Cartoons 🦄, Comedy 😂, News 📰, Sports ⚽), Resolution filter (4K, FHD, HD, SD), and Country picker |
+| ⌨️ TV & Desktop Nav | Arrow keys for channel/row navigation, Enter to play, `/` to search, Esc to clear/back, Space, F, M |
+| 🖱️ Trackpad & Mouse | 2-finger horizontal trackpad inertia, mouse wheel horizontal category scroll, card hover states |
+| ⚡ Edge Performance | Cloudflare Pages Anycast edge distribution, Upstash Redis caching (ADR-0015) |
+| 🌐 PWA | Installable on any device, background service worker precaching, offline catalogue fallback |
+| ⚙️ Settings | Data source indicators, low-latency mode toggle, cache management, shortcut reference |
 
 ---
 
@@ -27,20 +25,22 @@
 
 - **React 19** + **TypeScript** + **Vite 8**
 - **HLS.js** for adaptive live streaming
+- **Cloudflare Pages** for global Anycast edge delivery
+- **Upstash Redis** read-only edge cache (ADR-0015) with Supabase PostgREST fallback
 - **Supabase** — shared backend with the mobile app (channels, streams, EPG, categories)
 - **vite-plugin-pwa** + Workbox for service worker & installability
-- **Cloudflare 1.1.1.1 DNS over HTTPS** pre-connected on every page load
-- Deployed on **Netlify** with `netlify.toml` SPA routing
 
 ---
 
 ## Environment Variables
 
-Copy `.env.example` to `.env` and fill in your Supabase credentials:
+Copy `.env.example` to `.env`:
 
-```
-VITE_SUPABASE_URL=https://your-project.supabase.co
-VITE_SUPABASE_ANON_KEY=your-anon-key
+```bash
+VITE_SUPABASE_URL=https://xgookvlbhkchkktzrkau.supabase.co
+VITE_SUPABASE_ANON_KEY=your_anon_key
+VITE_UPSTASH_REDIS_REST_URL=https://your-upstash-endpoint.upstash.io
+VITE_UPSTASH_REDIS_REST_READONLY_TOKEN=your_upstash_readonly_token
 ```
 
 ---
@@ -50,30 +50,17 @@ VITE_SUPABASE_ANON_KEY=your-anon-key
 ```bash
 npm install
 npm run dev          # starts at http://localhost:5174
-npm run build        # production bundle + PWA service worker
+npm run build        # production build to dist/
 npm run lint         # oxlint
 ```
 
 ---
 
-## Deployment (Netlify)
+## Cloudflare Pages Deployment
 
-Push to `main` — Netlify auto-deploys via `netlify.toml`:
-
-```toml
-[build]
-  command = "npm run build"
-  publish = "dist"
-
-[[redirects]]
-  from = "/*"
-  to = "/index.html"
-  status = 200
-```
-
----
-
-## Related
-
-- [StreamLoom Android/TV App](https://github.com/SoftArchium/streamloom) — the native companion app
-- [SoftArchium](https://softarchium.com) — engineering & advisory
+StreamLoom Web is pre-configured for Cloudflare Pages:
+- **Build command:** `npm run build`
+- **Build output directory:** `dist`
+- **Node version:** `>= 20`
+- SPA routing handled automatically via `public/_redirects` (`/* /index.html 200`)
+- Edge caching and security headers defined in `public/_headers`

@@ -9,11 +9,27 @@
   margin-bottom: var(--space-md);
 }
 
+.category-row__title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
 .category-row__title {
   font-size: clamp(16px, 2vw, 20px);
   font-weight: 700;
   color: var(--text-primary);
   letter-spacing: -0.3px;
+}
+
+.category-row__count {
+  font-size: 12px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
 }
 
 .category-row__controls {
