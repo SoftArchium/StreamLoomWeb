@@ -1,11 +1,12 @@
-import { useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { useMemo, useState, useEffect } from 'react'
+import { Link, useLocation } from 'react-router-dom'
 import { useChannels, useFavourites, useRecent } from '../hooks/useChannels'
 import { ChannelCard } from '../components/ChannelCard'
 import { SearchBar } from '../components/SearchBar'
 import './Favorites.css'
 
 export function Favorites() {
+  const location = useLocation()
   const { channels, loading } = useChannels()
   const { favouriteIds } = useFavourites()
   const { addRecent } = useRecent()
@@ -27,6 +28,27 @@ export function Favorites() {
         (c.country ?? '').toLowerCase().includes(q)
     )
   }, [favChannels, search])
+
+  const filteredPlaylist = useMemo(() => filtered.map((c) => c.id), [filtered])
+
+  // Restore focus and scroll into view when returning from player
+  useEffect(() => {
+    const targetId =
+      (location.state as { targetChannelId?: string } | null)?.targetChannelId ||
+      sessionStorage.getItem('sl_last_viewed')
+
+    if (!targetId || filtered.length === 0) return
+
+    const timer = setTimeout(() => {
+      const el = document.querySelector(`[data-channel-id="${targetId}"]`) as HTMLElement | null
+      if (el) {
+        el.focus({ preventScroll: false })
+        el.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' })
+      }
+    }, 100)
+
+    return () => clearTimeout(timer)
+  }, [location.state, filtered.length])
 
   return (
     <div className="page-wrapper favorites-page">
@@ -70,6 +92,7 @@ export function Favorites() {
             <ChannelCard
               key={channel.id}
               channel={channel}
+              playlist={filteredPlaylist}
               onWatch={(id) => addRecent(id)}
             />
           ))}

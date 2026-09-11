@@ -48,7 +48,15 @@ export function HeroSection({ channels }: Props) {
         <div className="hero__actions">
           <button
             className="hero__btn hero__btn--primary"
-            onClick={() => navigate(`/watch/${encodeURIComponent(featured.id)}`)}
+            onClick={() => {
+              sessionStorage.setItem('sl_last_viewed', featured.id)
+              navigate(`/watch/${encodeURIComponent(featured.id)}`, {
+                state: {
+                  playlist: heroChannels.map((c) => c.id),
+                  returnTo: '/',
+                },
+              })
+            }}
           >
             ▶ Watch Now
           </button>

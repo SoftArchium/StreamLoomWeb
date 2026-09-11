@@ -248,16 +248,30 @@ export function useFavourites() {
   useEffect(() => {
     const rerender = () => setTick((t) => t + 1)
     _favListeners.add(rerender)
-    return () => { _favListeners.delete(rerender) }
+
+    function onStorage(e: StorageEvent) {
+      if (e.key === FAV_KEY) {
+        _favourites = readFavourites()
+        notifyFav()
+      }
+    }
+    window.addEventListener('storage', onStorage)
+
+    return () => {
+      _favListeners.delete(rerender)
+      window.removeEventListener('storage', onStorage)
+    }
   }, [])
 
   const toggle = useCallback((channelId: string) => {
-    if (_favourites.has(channelId)) {
-      _favourites.delete(channelId)
+    const next = new Set(_favourites)
+    if (next.has(channelId)) {
+      next.delete(channelId)
     } else {
-      _favourites.add(channelId)
+      next.add(channelId)
     }
-    writeFavourites(_favourites)
+    _favourites = next
+    writeFavourites(next)
     notifyFav()
   }, [])
 

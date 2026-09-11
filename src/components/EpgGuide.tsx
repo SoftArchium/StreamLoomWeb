@@ -90,6 +90,23 @@ export function EpgGuide({ channels, epgChannelIds }: Props) {
 
   const hours = Array.from({ length: 24 }, (_, h) => h)
   const [now] = useState(() => nowMinutes())
+  const guidePlaylist = useMemo(() => visibleChannels.map((c) => c.id), [visibleChannels])
+
+  // Restore focus to last viewed channel on return to guide
+  useEffect(() => {
+    const targetId = sessionStorage.getItem('sl_last_viewed')
+    if (!targetId || visibleChannels.length === 0) return
+
+    const timer = setTimeout(() => {
+      const el = document.querySelector(`[data-channel-id="${targetId}"]`) as HTMLElement | null
+      if (el) {
+        el.focus({ preventScroll: false })
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      }
+    }, 100)
+
+    return () => clearTimeout(timer)
+  }, [visibleChannels.length])
 
   return (
     <div className="epg-guide">
@@ -126,7 +143,16 @@ export function EpgGuide({ channels, epgChannelIds }: Props) {
               {/* Channel sidebar */}
               <div
                 className="epg-guide__channel-cell glass"
-                onClick={() => navigate(`/watch/${encodeURIComponent(ch.id)}`)}
+                data-channel-id={ch.id}
+                onClick={() => {
+                  sessionStorage.setItem('sl_last_viewed', ch.id)
+                  navigate(`/watch/${encodeURIComponent(ch.id)}`, {
+                    state: {
+                      playlist: guidePlaylist,
+                      returnTo: '/guide',
+                    },
+                  })
+                }}
                 role="button"
                 tabIndex={0}
               >
@@ -155,7 +181,15 @@ export function EpgGuide({ channels, epgChannelIds }: Props) {
                       className={`epg-guide__program ${isNow ? 'epg-guide__program--now' : ''}`}
                       style={{ left, width }}
                       title={`${formatTime(prog.start_time)} – ${prog.title}`}
-                      onClick={() => navigate(`/watch/${encodeURIComponent(ch.id)}`)}
+                      onClick={() => {
+                        sessionStorage.setItem('sl_last_viewed', ch.id)
+                        navigate(`/watch/${encodeURIComponent(ch.id)}`, {
+                          state: {
+                            playlist: guidePlaylist,
+                            returnTo: '/guide',
+                          },
+                        })
+                      }}
                     >
                       <span className="epg-guide__prog-title">{prog.title}</span>
                       <span className="epg-guide__prog-time">{formatTime(prog.start_time)}</span>

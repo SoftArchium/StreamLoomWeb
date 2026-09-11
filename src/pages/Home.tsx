@@ -1,4 +1,5 @@
 import { useState, useMemo, useCallback, useRef, useEffect } from 'react'
+import { useLocation } from 'react-router-dom'
 import { useChannels, useFavourites, useRecent } from '../hooks/useChannels'
 import type { EnrichedChannel } from '../hooks/useChannels'
 import { HeroSection } from '../components/HeroSection'
@@ -48,16 +49,18 @@ function matchQuality(quality: string | null | undefined, filter: string): boole
 const GRID_BATCH_SIZE = 36
 
 export function Home() {
+  const location = useLocation()
   const { channels, categories, loading, error, refresh } = useChannels()
   const { favouriteIds } = useFavourites()
   const { recentIds, addRecent } = useRecent()
 
-  const [search, setSearch] = useState('')
-  const [selectedCategory, setSelectedCategory] = useState<string | null>(null)
-  const [selectedCountry, setSelectedCountry] = useState<string | null>(null)
-  const [selectedQuality, setSelectedQuality] = useState<string>('All Quality')
-  const [showFavOnly, setShowFavOnly] = useState(false)
-  const [gridLimit, setGridLimit] = useState(GRID_BATCH_SIZE)
+  // Initialize filters from sessionStorage so they are preserved upon returning from player
+  const [search, setSearch] = useState(() => sessionStorage.getItem('sl_active_search') || '')
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(() => sessionStorage.getItem('sl_active_cat'))
+  const [selectedCountry, setSelectedCountry] = useState<string | null>(() => sessionStorage.getItem('sl_active_country'))
+  const [selectedQuality, setSelectedQuality] = useState<string>(() => sessionStorage.getItem('sl_active_quality') || 'All Quality')
+  const [showFavOnly, setShowFavOnly] = useState<boolean>(() => sessionStorage.getItem('sl_active_fav') === 'true')
+  const [userExpandedLimit, setUserExpandedLimit] = useState(0)
 
   const categoriesScrollRef = useRef<HTMLDivElement>(null)
 
@@ -137,21 +140,52 @@ export function Home() {
 
   const handleWatch = useCallback((channelId: string) => addRecent(channelId), [addRecent])
 
+  // Sync active filter selections to sessionStorage
+  useEffect(() => {
+    if (search) sessionStorage.setItem('sl_active_search', search)
+    else sessionStorage.removeItem('sl_active_search')
+  }, [search])
+
+  useEffect(() => {
+    if (selectedCategory) sessionStorage.setItem('sl_active_cat', selectedCategory)
+    else sessionStorage.removeItem('sl_active_cat')
+  }, [selectedCategory])
+
+  useEffect(() => {
+    if (selectedCountry) sessionStorage.setItem('sl_active_country', selectedCountry)
+    else sessionStorage.removeItem('sl_active_country')
+  }, [selectedCountry])
+
+  useEffect(() => {
+    if (selectedQuality && selectedQuality !== 'All Quality') sessionStorage.setItem('sl_active_quality', selectedQuality)
+    else sessionStorage.removeItem('sl_active_quality')
+  }, [selectedQuality])
+
+  useEffect(() => {
+    if (showFavOnly) sessionStorage.setItem('sl_active_fav', 'true')
+    else sessionStorage.removeItem('sl_active_fav')
+  }, [showFavOnly])
+
   const clearFilters = useCallback(() => {
     setSelectedCategory(null)
     setSelectedCountry(null)
     setSelectedQuality('All Quality')
     setShowFavOnly(false)
     setSearch('')
-    setGridLimit(GRID_BATCH_SIZE)
+    setUserExpandedLimit(0)
+    sessionStorage.removeItem('sl_active_cat')
+    sessionStorage.removeItem('sl_active_country')
+    sessionStorage.removeItem('sl_active_quality')
+    sessionStorage.removeItem('sl_active_fav')
+    sessionStorage.removeItem('sl_active_search')
   }, [])
 
-  // Reset grid limit when filters change without triggering effect cascade
+  // Reset expanded limit when filters change without triggering effect cascade
   const filterKey = `${selectedCategory}-${selectedCountry}-${selectedQuality}-${showFavOnly}-${search}`
   const [prevFilterKey, setPrevFilterKey] = useState(filterKey)
   if (prevFilterKey !== filterKey) {
     setPrevFilterKey(filterKey)
-    setGridLimit(GRID_BATCH_SIZE)
+    setUserExpandedLimit(0)
   }
 
   // Mouse wheel horizontal translation on category pill scroll
@@ -180,6 +214,42 @@ export function Home() {
     showFavOnly ||
     Boolean(search)
 
+  const activeGridChannels = searched !== null ? searched : baseFiltered
+  const isGridMode = hasActiveFilter || searched !== null
+  const activeGridPlaylist = useMemo(() => activeGridChannels.map((c) => c.id), [activeGridChannels])
+
+  const targetId =
+    (location.state as { targetChannelId?: string } | null)?.targetChannelId ||
+    sessionStorage.getItem('sl_last_viewed')
+
+  // Calculate effective gridLimit during render (ensures returning channel is rendered in DOM)
+  const gridLimit = useMemo(() => {
+    let base = GRID_BATCH_SIZE + userExpandedLimit
+    if (isGridMode && targetId) {
+      const targetIdx = activeGridChannels.findIndex((c) => c.id === targetId)
+      if (targetIdx >= 0) {
+        const needed = Math.ceil((targetIdx + 1) / GRID_BATCH_SIZE) * GRID_BATCH_SIZE
+        base = Math.max(base, needed)
+      }
+    }
+    return base
+  }, [userExpandedLimit, isGridMode, targetId, activeGridChannels])
+
+  // Restore focus and scroll into view when returning from watching a channel
+  useEffect(() => {
+    if (!targetId || playableChannels.length === 0) return
+
+    const timer = setTimeout(() => {
+      const el = document.querySelector(`[data-channel-id="${targetId}"]`) as HTMLElement | null
+      if (el) {
+        el.focus({ preventScroll: false })
+        el.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' })
+      }
+    }, 100)
+
+    return () => clearTimeout(timer)
+  }, [targetId, playableChannels.length])
+
   if (error) {
     return (
       <div className="home-error">
@@ -188,9 +258,6 @@ export function Home() {
       </div>
     )
   }
-
-  const activeGridChannels = searched !== null ? searched : baseFiltered
-  const isGridMode = hasActiveFilter || searched !== null
 
   return (
     <div className="page-wrapper home-page">
@@ -305,7 +372,12 @@ export function Home() {
               </div>
               <div className="home-search-results__grid">
                 {activeGridChannels.slice(0, gridLimit).map((ch) => (
-                  <ChannelCard key={ch.id} channel={ch} onWatch={handleWatch} />
+                  <ChannelCard
+                    key={ch.id}
+                    channel={ch}
+                    playlist={activeGridPlaylist}
+                    onWatch={handleWatch}
+                  />
                 ))}
               </div>
 
@@ -313,7 +385,7 @@ export function Home() {
                 <div className="home-load-more">
                   <button
                     className="home-load-more__btn"
-                    onClick={() => setGridLimit((prev) => prev + GRID_BATCH_SIZE)}
+                    onClick={() => setUserExpandedLimit((prev) => prev + GRID_BATCH_SIZE)}
                   >
                     Load More Channels ({activeGridChannels.length - gridLimit} remaining)
                   </button>

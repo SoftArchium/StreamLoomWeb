@@ -9,6 +9,7 @@ import './VideoPlayer.css'
 interface Props {
   channel: EnrichedChannel
   allChannels: EnrichedChannel[]
+  returnTo?: string
 }
 
 function getCurrentProgram(programs: EpgProgram[], nowMs: number): EpgProgram | undefined {
@@ -19,7 +20,7 @@ function getCurrentProgram(programs: EpgProgram[], nowMs: number): EpgProgram | 
   })
 }
 
-export function VideoPlayer({ channel, allChannels }: Props) {
+export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const hlsRef = useRef<Hls | null>(null)
@@ -45,7 +46,6 @@ export function VideoPlayer({ channel, allChannels }: Props) {
       setIsPlaying(true)
     } else {
       v.pause()
-      setIsPlaying(false)
     }
   }, [])
 
@@ -81,6 +81,39 @@ export function VideoPlayer({ channel, allChannels }: Props) {
     }
   }, [])
 
+  // Switch channel preserving the active playlist and return path
+  const switchChannel = useCallback((target: EnrichedChannel) => {
+    sessionStorage.setItem('sl_last_viewed', target.id)
+    navigate(`/watch/${encodeURIComponent(target.id)}`, {
+      replace: true,
+      state: {
+        playlist: allChannels.map((c) => c.id),
+        returnTo,
+      },
+    })
+  }, [allChannels, returnTo, navigate])
+
+  // Return to the exact screen entered from and target the last watched channel
+  const handleBack = useCallback(() => {
+    sessionStorage.setItem('sl_last_viewed', channel.id)
+    navigate(returnTo, { state: { targetChannelId: channel.id } })
+  }, [channel.id, returnTo, navigate])
+
+  const channelIdx = allChannels.findIndex((c) => c.id === channel.id)
+
+  // Cycle within filtered list in the same order shown, with wraparound
+  const prevChannel = useMemo(() => {
+    if (allChannels.length <= 1) return null
+    if (channelIdx > 0) return allChannels[channelIdx - 1]
+    return allChannels[allChannels.length - 1]
+  }, [allChannels, channelIdx])
+
+  const nextChannel = useMemo(() => {
+    if (allChannels.length <= 1) return null
+    if (channelIdx >= 0 && channelIdx < allChannels.length - 1) return allChannels[channelIdx + 1]
+    return allChannels[0]
+  }, [allChannels, channelIdx])
+
   const loadStream = useCallback((url: string) => {
     const video = videoRef.current
     if (!video) return
@@ -109,10 +142,8 @@ export function VideoPlayer({ channel, allChannels }: Props) {
         liveSyncDurationCount: 3,
         liveMaxLatencyDurationCount: 6,
         startFragPrefetch: true,
-        // Fast start
         startLevel: -1,
         abrEwmaDefaultEstimate: 5_000_000,
-        // Resilient loading
         manifestLoadingTimeOut: 10000,
         manifestLoadingMaxRetry: 5,
         manifestLoadingRetryDelay: 500,
@@ -172,6 +203,7 @@ export function VideoPlayer({ channel, allChannels }: Props) {
     if (streamUrl) {
       loadStream(streamUrl)
       addRecent(channel.id)
+      sessionStorage.setItem('sl_last_viewed', channel.id)
     }
     return () => {
       hlsRef.current?.destroy()
@@ -181,22 +213,21 @@ export function VideoPlayer({ channel, allChannels }: Props) {
 
   // Keybindings
   useEffect(() => {
-    const idx = allChannels.findIndex((c) => c.id === channel.id)
-
     function onKey(e: KeyboardEvent) {
       if ((e.target as HTMLElement).tagName === 'INPUT') return
 
       if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') {
-        const prev = [...allChannels].slice(0, idx).reverse().find((c) => c.stream)
-        if (prev) navigate(`/watch/${encodeURIComponent(prev.id)}`, { replace: true })
+        e.preventDefault()
+        if (prevChannel) switchChannel(prevChannel)
       } else if (e.key === 'ArrowDown' || e.key === 'ArrowRight') {
-        const next = allChannels.slice(idx + 1).find((c) => c.stream)
-        if (next) navigate(`/watch/${encodeURIComponent(next.id)}`, { replace: true })
+        e.preventDefault()
+        if (nextChannel) switchChannel(nextChannel)
       } else if (e.key === 'Escape' || e.key === 'Backspace') {
+        e.preventDefault()
         if (showChannelList) {
           setShowChannelList(false)
         } else {
-          navigate(-1)
+          handleBack()
         }
       } else if (e.key === ' ') {
         e.preventDefault()
@@ -210,7 +241,7 @@ export function VideoPlayer({ channel, allChannels }: Props) {
 
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [channel.id, allChannels, navigate, showChannelList, togglePlayPause, toggleFullscreen, toggleMute])
+  }, [prevChannel, nextChannel, switchChannel, handleBack, showChannelList, togglePlayPause, toggleFullscreen, toggleMute])
 
   const [currentTimestamp] = useState(() => Date.now())
   const nowPlaying = useMemo(() => getCurrentProgram(programs, currentTimestamp), [programs, currentTimestamp])
@@ -219,10 +250,6 @@ export function VideoPlayer({ channel, allChannels }: Props) {
     [programs, currentTimestamp]
   )
   const fav = isFavourite(channel.id)
-
-  const channelIdx = allChannels.findIndex((c) => c.id === channel.id)
-  const prevChannel = [...allChannels].slice(0, channelIdx).reverse().find((c) => c.stream)
-  const nextChannel = allChannels.slice(channelIdx + 1).find((c) => c.stream)
 
   return (
     <div className="player" ref={containerRef}>
@@ -263,7 +290,7 @@ export function VideoPlayer({ channel, allChannels }: Props) {
             {nextChannel && (
               <button
                 className="player__overlay-btn"
-                onClick={() => navigate(`/watch/${encodeURIComponent(nextChannel.id)}`, { replace: true })}
+                onClick={() => switchChannel(nextChannel)}
               >
                 Next Channel →
               </button>
@@ -274,7 +301,7 @@ export function VideoPlayer({ channel, allChannels }: Props) {
 
       {/* Top HUD */}
       <div className="player__hud player__hud--top">
-        <button className="player__back" onClick={() => navigate(-1)} aria-label="Go back">
+        <button className="player__back" onClick={handleBack} aria-label="Go back">
           ← Back
         </button>
 
@@ -334,7 +361,7 @@ export function VideoPlayer({ channel, allChannels }: Props) {
           </button>
           <button
             className="player__ch-btn"
-            onClick={() => prevChannel && navigate(`/watch/${encodeURIComponent(prevChannel.id)}`, { replace: true })}
+            onClick={() => prevChannel && switchChannel(prevChannel)}
             disabled={!prevChannel}
             aria-label="Previous channel"
           >
@@ -349,7 +376,7 @@ export function VideoPlayer({ channel, allChannels }: Props) {
         <div className="player__bottom-right">
           <button
             className="player__ch-btn"
-            onClick={() => nextChannel && navigate(`/watch/${encodeURIComponent(nextChannel.id)}`, { replace: true })}
+            onClick={() => nextChannel && switchChannel(nextChannel)}
             disabled={!nextChannel}
             aria-label="Next channel"
           >
@@ -378,7 +405,7 @@ export function VideoPlayer({ channel, allChannels }: Props) {
       {showChannelList && (
         <div className="player__drawer glass">
           <div className="player__drawer-header">
-            <h3>All Channels ({allChannels.length})</h3>
+            <h3>Playlist Channels ({allChannels.length})</h3>
             <button onClick={() => setShowChannelList(false)} aria-label="Close drawer">✕</button>
           </div>
           <div className="player__drawer-list">
@@ -388,7 +415,7 @@ export function VideoPlayer({ channel, allChannels }: Props) {
                 className={`player__drawer-item ${c.id === channel.id ? 'player__drawer-item--active' : ''}`}
                 onClick={() => {
                   setShowChannelList(false)
-                  navigate(`/watch/${encodeURIComponent(c.id)}`, { replace: true })
+                  switchChannel(c)
                 }}
               >
                 {c.logo ? (

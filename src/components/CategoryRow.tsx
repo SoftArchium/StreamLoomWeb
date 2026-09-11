@@ -87,6 +87,7 @@ export function CategoryRow({ title, channels, nowPlayingMap, onWatch }: Props) 
             channel={ch}
             nowPlaying={nowPlayingMap?.get(ch.id)}
             onWatch={onWatch}
+            playlist={channels.map((c) => c.id)}
           />
         ))}
       </div>

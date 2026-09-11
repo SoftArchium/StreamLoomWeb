@@ -1,5 +1,5 @@
 import { useCallback } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useLocation } from 'react-router-dom'
 import type { EnrichedChannel } from '../hooks/useChannels'
 import type { EpgProgram } from '../api/supabase'
 import { useFavourites } from '../hooks/useChannels'
@@ -10,10 +10,12 @@ interface Props {
   nowPlaying?: EpgProgram | null
   size?: 'small' | 'medium' | 'large'
   onWatch?: (channelId: string) => void
+  playlist?: string[]
 }
 
-export function ChannelCard({ channel, nowPlaying, size = 'medium', onWatch }: Props) {
+export function ChannelCard({ channel, nowPlaying, size = 'medium', onWatch, playlist }: Props) {
   const navigate = useNavigate()
+  const location = useLocation()
   const { isFavourite, toggle } = useFavourites()
   const hasStream = !!channel.stream
   const fav = isFavourite(channel.id)
@@ -21,11 +23,18 @@ export function ChannelCard({ channel, nowPlaying, size = 'medium', onWatch }: P
   const handleClick = useCallback(() => {
     if (!hasStream) return
     onWatch?.(channel.id)
-    navigate(`/watch/${encodeURIComponent(channel.id)}`)
-  }, [hasStream, channel.id, navigate, onWatch])
+    sessionStorage.setItem('sl_last_viewed', channel.id)
+    navigate(`/watch/${encodeURIComponent(channel.id)}`, {
+      state: {
+        playlist: playlist ?? [channel.id],
+        returnTo: location.pathname + location.search,
+      },
+    })
+  }, [hasStream, channel.id, playlist, location.pathname, location.search, navigate, onWatch])
 
   const handleFav = useCallback((e: React.MouseEvent) => {
     e.stopPropagation()
+    e.preventDefault()
     toggle(channel.id)
   }, [channel.id, toggle])
 
