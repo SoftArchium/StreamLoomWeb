@@ -15,7 +15,39 @@
 }
 
 /* Overlays (Buffering & Error) */
-/* Overlays (Buffering & Error) */
+.player__toast {
+  position: absolute;
+  top: calc(75px + var(--sat));
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(20, 20, 30, 0.88);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: #fff;
+  padding: 8px 18px;
+  border-radius: var(--radius-full);
+  font-size: 13px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  backdrop-filter: blur(16px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  z-index: 50;
+  pointer-events: none;
+  animation: fadeInDown 0.25s ease-out;
+}
+
+@keyframes fadeInDown {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -10px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+
 .player__state-overlay {
   position: absolute;
   inset: 0;

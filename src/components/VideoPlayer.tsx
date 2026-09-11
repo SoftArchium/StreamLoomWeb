@@ -5,6 +5,7 @@ import type { EnrichedChannel } from '../hooks/useChannels'
 import type { EpgProgram } from '../api/supabase'
 import { useEpg, useFavourites, useRecent } from '../hooks/useChannels'
 import { formatCountryDisplay } from '../util/country'
+import { getProxyStreamUrl, isMixedContent, markStreamBroken, unmarkStreamBroken } from '../util/stream'
 import './VideoPlayer.css'
 
 interface Props {
@@ -198,19 +199,53 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
   }, [allChannels, channelIdx])
 
   const [isSlowConnecting, setIsSlowConnecting] = useState(false)
+  const [toastMessage, setToastMessage] = useState<string | null>(null)
+  const toastTimer = useRef<number | null>(null)
+  const autoSkipTimer = useRef<number | null>(null)
+  const isProxiedRef = useRef(false)
 
-  const loadStream = useCallback((url: string) => {
+  const showToast = useCallback((msg: string, duration = 2500) => {
+    setToastMessage(msg)
+    if (toastTimer.current) window.clearTimeout(toastTimer.current)
+    toastTimer.current = window.setTimeout(() => {
+      setToastMessage(null)
+    }, duration)
+  }, [])
+
+  const autoSkipEnabled = localStorage.getItem('sl_auto_skip') !== 'false'
+  const loadStreamRef = useRef<((url: string, useProxy?: boolean) => void) | null>(null)
+
+  const loadStream = useCallback((url: string, useProxy = false) => {
     const video = videoRef.current
     if (!video) return
 
     setIsBuffering(true)
     setIsSlowConnecting(false)
     setHasError(false)
+    isProxiedRef.current = useProxy
 
     if (connectionTimeoutTimer.current) window.clearTimeout(connectionTimeoutTimer.current)
+    if (autoSkipTimer.current) window.clearTimeout(autoSkipTimer.current)
+
+    // Slow connection indicator after 4s
     connectionTimeoutTimer.current = window.setTimeout(() => {
       setIsSlowConnecting(true)
-    }, 6000)
+    }, 4000)
+
+    // Auto-skip trigger if buffering exceeds 6s without data
+    if (autoSkipEnabled && nextChannel && nextChannel.id !== channel.id) {
+      autoSkipTimer.current = window.setTimeout(() => {
+        if (!useProxy && !url.startsWith('/api/proxy')) {
+          // Attempt proxy first before giving up
+          showToast(`Stream slow, trying edge proxy…`)
+          loadStreamRef.current?.(getProxyStreamUrl(url), true)
+        } else {
+          markStreamBroken(channel.id)
+          showToast(`Skipping unresponsive channel: ${channel.name}…`)
+          switchChannel(nextChannel)
+        }
+      }, 7000)
+    }
 
     if (hlsRef.current) {
       hlsRef.current.stopLoad()
@@ -218,6 +253,12 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
       hlsRef.current.destroy()
       hlsRef.current = null
     }
+
+    // Determine target playback URL
+    // If mixed content (http on https), automatically route through proxy immediately
+    const targetUrl = isMixedContent(url) || useProxy
+      ? getProxyStreamUrl(url)
+      : url
 
     if (Hls.isSupported()) {
       const isLowLatency = localStorage.getItem('sl_low_latency') !== 'false'
@@ -237,22 +278,24 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
         startFragPrefetch: true,
         startLevel: -1,
         abrEwmaDefaultEstimate: 5_000_000,
-        manifestLoadingTimeOut: 5000,
-        manifestLoadingMaxRetry: 2,
-        manifestLoadingRetryDelay: 400,
-        levelLoadingTimeOut: 5000,
-        fragLoadingTimeOut: 6000,
-        fragLoadingMaxRetry: 2,
-        fragLoadingRetryDelay: 400,
+        manifestLoadingTimeOut: 4500,
+        manifestLoadingMaxRetry: 1,
+        manifestLoadingRetryDelay: 300,
+        levelLoadingTimeOut: 4500,
+        fragLoadingTimeOut: 5000,
+        fragLoadingMaxRetry: 1,
+        fragLoadingRetryDelay: 300,
       })
 
-      hls.loadSource(url)
+      hls.loadSource(targetUrl)
       hls.attachMedia(video)
 
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
         setIsBuffering(false)
         setIsSlowConnecting(false)
+        unmarkStreamBroken(channel.id)
         if (connectionTimeoutTimer.current) window.clearTimeout(connectionTimeoutTimer.current)
+        if (autoSkipTimer.current) window.clearTimeout(autoSkipTimer.current)
         video.play().catch(() => {
           setIsPlaying(false)
         })
@@ -261,24 +304,50 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
       hls.on(Hls.Events.FRAG_BUFFERED, () => {
         setIsBuffering(false)
         setIsSlowConnecting(false)
+        unmarkStreamBroken(channel.id)
         if (connectionTimeoutTimer.current) window.clearTimeout(connectionTimeoutTimer.current)
+        if (autoSkipTimer.current) window.clearTimeout(autoSkipTimer.current)
       })
 
       hls.on(Hls.Events.ERROR, (_, data) => {
         if (data.fatal) {
           switch (data.type) {
             case Hls.ErrorTypes.NETWORK_ERROR:
-              hls.startLoad()
+              // If network error occurred on direct URL, retry through edge proxy
+              if (!isProxiedRef.current && !url.startsWith('/api/proxy')) {
+                showToast(`CORS/Network block detected, routing via edge proxy…`)
+                loadStreamRef.current?.(url, true)
+              } else {
+                markStreamBroken(channel.id)
+                if (autoSkipEnabled && nextChannel && nextChannel.id !== channel.id) {
+                  showToast(`Stream unavailable, auto-advancing…`)
+                  window.setTimeout(() => switchChannel(nextChannel), 800)
+                } else {
+                  setHasError(true)
+                  setIsBuffering(false)
+                  setIsSlowConnecting(false)
+                  if (connectionTimeoutTimer.current) window.clearTimeout(connectionTimeoutTimer.current)
+                  if (autoSkipTimer.current) window.clearTimeout(autoSkipTimer.current)
+                  hls.destroy()
+                }
+              }
               break
             case Hls.ErrorTypes.MEDIA_ERROR:
               hls.recoverMediaError()
               break
             default:
-              setHasError(true)
-              setIsBuffering(false)
-              setIsSlowConnecting(false)
-              if (connectionTimeoutTimer.current) window.clearTimeout(connectionTimeoutTimer.current)
-              hls.destroy()
+              markStreamBroken(channel.id)
+              if (autoSkipEnabled && nextChannel && nextChannel.id !== channel.id) {
+                showToast(`Playback error, auto-advancing…`)
+                window.setTimeout(() => switchChannel(nextChannel), 800)
+              } else {
+                setHasError(true)
+                setIsBuffering(false)
+                setIsSlowConnecting(false)
+                if (connectionTimeoutTimer.current) window.clearTimeout(connectionTimeoutTimer.current)
+                if (autoSkipTimer.current) window.clearTimeout(autoSkipTimer.current)
+                hls.destroy()
+              }
               break
           }
         }
@@ -286,21 +355,38 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
 
       hlsRef.current = hls
     } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-      video.src = url
+      video.src = targetUrl
       video.addEventListener('loadedmetadata', () => {
         setIsBuffering(false)
         setIsSlowConnecting(false)
+        unmarkStreamBroken(channel.id)
         if (connectionTimeoutTimer.current) window.clearTimeout(connectionTimeoutTimer.current)
+        if (autoSkipTimer.current) window.clearTimeout(autoSkipTimer.current)
         video.play().catch(() => setIsPlaying(false))
       })
       video.addEventListener('error', () => {
-        setHasError(true)
-        setIsBuffering(false)
-        setIsSlowConnecting(false)
-        if (connectionTimeoutTimer.current) window.clearTimeout(connectionTimeoutTimer.current)
+        if (!isProxiedRef.current && !url.startsWith('/api/proxy')) {
+          loadStreamRef.current?.(url, true)
+        } else {
+          markStreamBroken(channel.id)
+          if (autoSkipEnabled && nextChannel && nextChannel.id !== channel.id) {
+            showToast(`Unable to play stream, skipping…`)
+            window.setTimeout(() => switchChannel(nextChannel), 800)
+          } else {
+            setHasError(true)
+            setIsBuffering(false)
+            setIsSlowConnecting(false)
+            if (connectionTimeoutTimer.current) window.clearTimeout(connectionTimeoutTimer.current)
+            if (autoSkipTimer.current) window.clearTimeout(autoSkipTimer.current)
+          }
+        }
       })
     }
-  }, [])
+  }, [channel.id, channel.name, autoSkipEnabled, nextChannel, switchChannel, showToast])
+
+  useEffect(() => {
+    loadStreamRef.current = loadStream
+  }, [loadStream])
 
   useEffect(() => {
     const video = videoRef.current
@@ -311,6 +397,8 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
     }
     return () => {
       if (connectionTimeoutTimer.current) window.clearTimeout(connectionTimeoutTimer.current)
+      if (autoSkipTimer.current) window.clearTimeout(autoSkipTimer.current)
+      if (toastTimer.current) window.clearTimeout(toastTimer.current)
       if (hlsRef.current) {
         hlsRef.current.stopLoad()
         hlsRef.current.detachMedia()
@@ -429,27 +517,41 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
         </div>
       )}
 
+      {/* Toast message */}
+      {toastMessage && (
+        <div className="player__toast">
+          <span>⚡</span>
+          <span>{toastMessage}</span>
+        </div>
+      )}
+
       {/* Error Overlay */}
       {hasError && (
         <div className="player__state-overlay player__state-overlay--error">
-          <p>⚠️ Unable to play this stream</p>
-          <div style={{ display: 'flex', gap: 10 }}>
+          <p>⚠️ Unable to play this stream directly</p>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', justifyContent: 'center' }}>
             {streamUrl && (
               <button
                 className="player__overlay-btn"
-                onClick={() => loadStream(streamUrl)}
+                onClick={() => loadStream(streamUrl, true)}
               >
-                Retry
+                Retry via Edge Proxy ⚡
               </button>
             )}
             {nextChannel && (
               <button
-                className="player__overlay-btn"
+                className="player__overlay-btn player__overlay-btn--skip"
                 onClick={() => switchChannel(nextChannel)}
               >
                 Next Channel →
               </button>
             )}
+            <button
+              className="player__overlay-btn player__overlay-btn--back"
+              onClick={handleBack}
+            >
+              ← Back
+            </button>
           </div>
         </div>
       )}

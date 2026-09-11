@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useChannels } from '../hooks/useChannels'
+import { getBrokenCount, clearBrokenStreams } from '../util/stream'
 import './Settings.css'
 
 export function Settings() {
@@ -7,11 +8,30 @@ export function Settings() {
   const [lowLatency, setLowLatency] = useState(() => {
     return localStorage.getItem('sl_low_latency') !== 'false'
   })
+  const [autoSkip, setAutoSkip] = useState(() => {
+    return localStorage.getItem('sl_auto_skip') !== 'false'
+  })
+  const [brokenCount, setBrokenCount] = useState(() => getBrokenCount())
   const [clearedNotice, setClearedNotice] = useState(false)
+  const [clearedBrokenNotice, setClearedBrokenNotice] = useState(false)
 
   const handleLowLatencyChange = (enabled: boolean) => {
     setLowLatency(enabled)
     localStorage.setItem('sl_low_latency', enabled ? 'true' : 'false')
+  }
+
+  const handleAutoSkipChange = (enabled: boolean) => {
+    setAutoSkip(enabled)
+    localStorage.setItem('sl_auto_skip', enabled ? 'true' : 'false')
+  }
+
+  const handleClearBrokenStreams = () => {
+    clearBrokenStreams()
+    setBrokenCount(0)
+    setClearedBrokenNotice(true)
+    setTimeout(() => {
+      setClearedBrokenNotice(false)
+    }, 1500)
   }
 
   const handleClearCache = () => {
@@ -44,8 +64,8 @@ export function Settings() {
           <div className="settings-card__header">
             <span className="settings-card__icon">🎬</span>
             <div>
-              <h3>Playback Engine</h3>
-              <p>Fine-tune live video buffer and latency profile</p>
+              <h3>Playback Engine & Resiliency</h3>
+              <p>Fine-tune live video buffer, latency profile, and auto-failover</p>
             </div>
           </div>
           <div className="settings-card__body">
@@ -63,6 +83,21 @@ export function Settings() {
                 <span className="toggle-slider" />
               </label>
             </div>
+
+            <div className="settings-item">
+              <div className="settings-item__info">
+                <strong>Auto-Skip Unavailable Channels</strong>
+                <span>Seamlessly advance to next channel if a stream errors or times out</span>
+              </div>
+              <label className="toggle-switch">
+                <input
+                  type="checkbox"
+                  checked={autoSkip}
+                  onChange={(e) => handleAutoSkipChange(e.target.checked)}
+                />
+                <span className="toggle-slider" />
+              </label>
+            </div>
           </div>
         </section>
 
@@ -71,8 +106,8 @@ export function Settings() {
           <div className="settings-card__header">
             <span className="settings-card__icon">💾</span>
             <div>
-              <h3>Storage & Offline Cache</h3>
-              <p>Manage locally cached channels and playlists</p>
+              <h3>Storage & Resilience Cache</h3>
+              <p>Manage locally cached channels and stream health records</p>
             </div>
           </div>
           <div className="settings-card__body">
@@ -87,6 +122,20 @@ export function Settings() {
                 disabled={clearedNotice}
               >
                 {clearedNotice ? 'Cleared!' : 'Clear Cache'}
+              </button>
+            </div>
+
+            <div className="settings-item">
+              <div className="settings-item__info">
+                <strong>Unavailable Channels Log</strong>
+                <span>{brokenCount} unresponsive channels flagged for auto-bypass</span>
+              </div>
+              <button
+                className="settings-btn"
+                onClick={handleClearBrokenStreams}
+                disabled={clearedBrokenNotice || brokenCount === 0}
+              >
+                {clearedBrokenNotice ? 'Reset!' : 'Reset Log'}
               </button>
             </div>
           </div>
