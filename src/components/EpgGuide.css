@@ -176,3 +176,45 @@
   color: var(--text-muted);
   line-height: 72px;
 }
+
+/* Responsive Guide */
+@media (max-width: 768px) {
+  .epg-guide__sidebar-spacer,
+  .epg-guide__channel-cell {
+    width: 140px;
+    min-width: 140px;
+    padding: 0 8px;
+    gap: 6px;
+  }
+
+  .epg-guide__channel-logo,
+  .epg-guide__channel-initials {
+    width: 28px;
+    height: 28px;
+    font-size: 10px;
+  }
+
+  .epg-guide__channel-name {
+    font-size: 11px;
+  }
+}
+
+@media (max-width: 480px) {
+  .epg-guide__sidebar-spacer,
+  .epg-guide__channel-cell {
+    width: 110px;
+    min-width: 110px;
+    padding: 0 6px;
+    gap: 4px;
+  }
+
+  .epg-guide__channel-logo,
+  .epg-guide__channel-initials {
+    width: 24px;
+    height: 24px;
+  }
+
+  .epg-guide__channel-name {
+    font-size: 10px;
+  }
+}

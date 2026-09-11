@@ -55,7 +55,14 @@
 
   /* Layout */
   --nav-height: 64px;
-  --page-padding: clamp(16px, 4vw, 56px);
+  --mobile-tab-height: 60px;
+  --page-padding: clamp(14px, 3.5vw, 48px);
+
+  /* Safe Areas (iOS notch, dynamic island, Android navigation bars) */
+  --sat: env(safe-area-inset-top, 0px);
+  --sar: env(safe-area-inset-right, 0px);
+  --sab: env(safe-area-inset-bottom, 0px);
+  --sal: env(safe-area-inset-left, 0px);
 }
 
 /* ---------- Reset ---------- */
@@ -74,6 +81,7 @@ body {
   color: var(--text-primary);
   min-height: 100dvh;
   overflow-x: hidden;
+  -webkit-tap-highlight-color: transparent;
 }
 
 img { display: block; max-width: 100%; }
@@ -110,8 +118,17 @@ ul, ol { list-style: none; }
 
 /* ---------- Page Layout ---------- */
 .page-wrapper {
-  padding: var(--nav-height) var(--page-padding) var(--space-2xl);
+  padding-top: calc(var(--nav-height) + var(--sat) + 12px);
+  padding-right: calc(var(--page-padding) + var(--sar));
+  padding-bottom: calc(var(--space-2xl) + var(--sab));
+  padding-left: calc(var(--page-padding) + var(--sal));
   min-height: 100dvh;
+}
+
+@media (max-width: 767px) {
+  .page-wrapper {
+    padding-bottom: calc(var(--mobile-tab-height) + var(--sab) + 24px);
+  }
 }
 
 /* ---------- Loading Skeleton ---------- */

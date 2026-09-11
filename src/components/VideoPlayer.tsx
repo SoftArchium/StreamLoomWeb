@@ -35,6 +35,26 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
   const [isBuffering, setIsBuffering] = useState(true)
   const [hasError, setHasError] = useState(false)
   const [showChannelList, setShowChannelList] = useState(false)
+  const [showHud, setShowHud] = useState(true)
+  const hideHudTimer = useRef<number | null>(null)
+
+  const resetHudTimer = useCallback(() => {
+    setShowHud(true)
+    if (hideHudTimer.current) window.clearTimeout(hideHudTimer.current)
+    hideHudTimer.current = window.setTimeout(() => {
+      setShowHud(false)
+    }, 4000)
+  }, [])
+
+  useEffect(() => {
+    if (hideHudTimer.current) window.clearTimeout(hideHudTimer.current)
+    hideHudTimer.current = window.setTimeout(() => {
+      setShowHud(false)
+    }, 4000)
+    return () => {
+      if (hideHudTimer.current) window.clearTimeout(hideHudTimer.current)
+    }
+  }, [channel.id])
 
   const streamUrl = channel.stream?.url
 
@@ -47,14 +67,16 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
     } else {
       v.pause()
     }
-  }, [])
+    resetHudTimer()
+  }, [resetHudTimer])
 
   const toggleMute = useCallback(() => {
     const v = videoRef.current
     if (!v) return
     v.muted = !v.muted
     setIsMuted(v.muted)
-  }, [])
+    resetHudTimer()
+  }, [resetHudTimer])
 
   const toggleFullscreen = useCallback(() => {
     const container = containerRef.current
@@ -65,7 +87,8 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
     } else {
       document.exitFullscreen().then(() => setIsFullscreen(false)).catch(() => {})
     }
-  }, [])
+    resetHudTimer()
+  }, [resetHudTimer])
 
   const togglePiP = useCallback(async () => {
     const v = videoRef.current
@@ -79,7 +102,8 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
     } catch {
       // ignore
     }
-  }, [])
+    resetHudTimer()
+  }, [resetHudTimer])
 
   // Switch channel preserving the active playlist and return path
   const switchChannel = useCallback((target: EnrichedChannel) => {
@@ -216,6 +240,8 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
     function onKey(e: KeyboardEvent) {
       if ((e.target as HTMLElement).tagName === 'INPUT') return
 
+      resetHudTimer()
+
       if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') {
         e.preventDefault()
         if (prevChannel) switchChannel(prevChannel)
@@ -241,7 +267,7 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
 
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [prevChannel, nextChannel, switchChannel, handleBack, showChannelList, togglePlayPause, toggleFullscreen, toggleMute])
+  }, [prevChannel, nextChannel, switchChannel, handleBack, showChannelList, togglePlayPause, toggleFullscreen, toggleMute, resetHudTimer])
 
   const [currentTimestamp] = useState(() => Date.now())
   const nowPlaying = useMemo(() => getCurrentProgram(programs, currentTimestamp), [programs, currentTimestamp])
@@ -252,7 +278,12 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
   const fav = isFavourite(channel.id)
 
   return (
-    <div className="player" ref={containerRef}>
+    <div
+      className={`player ${showHud ? 'player--hud-visible' : ''}`}
+      ref={containerRef}
+      onMouseMove={resetHudTimer}
+      onTouchStart={resetHudTimer}
+    >
       <video
         ref={videoRef}
         className="player__video"
@@ -263,7 +294,7 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
           setIsBuffering(false)
           setIsPlaying(true)
         }}
-        onClick={togglePlayPause}
+        onClick={() => setShowHud((v) => !v)}
       />
 
       {/* Buffering Indicator */}
@@ -309,7 +340,7 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
           {channel.logo && (
             <img src={channel.logo} alt={channel.name} className="player__logo" />
           )}
-          <div>
+          <div className="player__info-text">
             <p className="player__name">{channel.name}</p>
             {nowPlaying && (
               <p className="player__now">
@@ -344,60 +375,70 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
 
       {/* Bottom HUD */}
       <div className="player__hud player__hud--bottom">
-        <div className="player__bottom-left">
-          <button
-            className="player__action-btn"
-            onClick={togglePlayPause}
-            aria-label={isPlaying ? 'Pause' : 'Play'}
-          >
-            {isPlaying ? '⏸' : '▶'}
-          </button>
-          <button
-            className="player__action-btn"
-            onClick={toggleMute}
-            aria-label={isMuted ? 'Unmute' : 'Mute'}
-          >
-            {isMuted ? '🔇' : '🔊'}
-          </button>
-          <button
-            className="player__ch-btn"
-            onClick={() => prevChannel && switchChannel(prevChannel)}
-            disabled={!prevChannel}
-            aria-label="Previous channel"
-          >
-            ◀ {prevChannel?.name ?? '—'}
-          </button>
-        </div>
+        <div className="player__bottom-layout">
+          {/* Channel cycling controls */}
+          <div className="player__ch-nav">
+            <button
+              className="player__ch-btn"
+              onClick={() => prevChannel && switchChannel(prevChannel)}
+              disabled={!prevChannel}
+              aria-label="Previous channel"
+            >
+              ◀ <span className="player__ch-label">{prevChannel?.name ?? '—'}</span>
+            </button>
 
-        <div className="player__ch-center">
-          <span className="player__ch-number">CH {channelIdx + 1} of {allChannels.length}</span>
-        </div>
+            <div className="player__ch-center">
+              <span className="player__ch-number">CH {channelIdx + 1} of {allChannels.length}</span>
+            </div>
 
-        <div className="player__bottom-right">
-          <button
-            className="player__ch-btn"
-            onClick={() => nextChannel && switchChannel(nextChannel)}
-            disabled={!nextChannel}
-            aria-label="Next channel"
-          >
-            {nextChannel?.name ?? '—'} ▶
-          </button>
-          <button
-            className="player__action-btn"
-            onClick={togglePiP}
-            title="Picture-in-Picture"
-            aria-label="Picture in Picture"
-          >
-            ⧉
-          </button>
-          <button
-            className="player__action-btn"
-            onClick={toggleFullscreen}
-            title="Toggle fullscreen"
-            aria-label="Fullscreen"
-          >
-            {isFullscreen ? '⤓' : '⤢'}
-          </button>
+            <button
+              className="player__ch-btn"
+              onClick={() => nextChannel && switchChannel(nextChannel)}
+              disabled={!nextChannel}
+              aria-label="Next channel"
+            >
+              <span className="player__ch-label">{nextChannel?.name ?? '—'}</span> ▶
+            </button>
+          </div>
+
+          {/* Media actions */}
+          <div className="player__playback-nav">
+            <div className="player__playback-left">
+              <button
+                className="player__action-btn"
+                onClick={togglePlayPause}
+                aria-label={isPlaying ? 'Pause' : 'Play'}
+              >
+                {isPlaying ? '⏸' : '▶'}
+              </button>
+              <button
+                className="player__action-btn"
+                onClick={toggleMute}
+                aria-label={isMuted ? 'Unmute' : 'Mute'}
+              >
+                {isMuted ? '🔇' : '🔊'}
+              </button>
+            </div>
+
+            <div className="player__playback-right">
+              <button
+                className="player__action-btn"
+                onClick={togglePiP}
+                title="Picture-in-Picture"
+                aria-label="Picture in Picture"
+              >
+                ⧉
+              </button>
+              <button
+                className="player__action-btn"
+                onClick={toggleFullscreen}
+                title="Toggle fullscreen"
+                aria-label="Fullscreen"
+              >
+                {isFullscreen ? '⤓' : '⤢'}
+              </button>
+            </div>
+          </div>
         </div>
       </div>
 

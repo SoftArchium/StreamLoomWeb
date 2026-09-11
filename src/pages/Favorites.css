@@ -39,8 +39,30 @@
 
 .favorites-page__grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: 20px;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: var(--space-lg);
+}
+
+.favorites-page__grid .channel-card {
+  width: 100%;
+}
+
+@media (max-width: 768px) {
+  .favorites-page__title {
+    font-size: 1.6rem;
+  }
+
+  .favorites-page__grid {
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: var(--space-md);
+  }
+}
+
+@media (max-width: 480px) {
+  .favorites-page__grid {
+    grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+    gap: 10px;
+  }
 }
 
 .favorites-page__empty {
