@@ -17,7 +17,9 @@ export function Settings() {
 
   const handleClearCache = () => {
     try {
+      localStorage.removeItem('sl_catalogue_v4')
       localStorage.removeItem('sl_catalogue_v3')
+      localStorage.removeItem('sl_catalogue_v2')
       localStorage.removeItem('sl_recent_v1')
       setClearedNotice(true)
       setTimeout(() => {

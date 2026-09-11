@@ -84,17 +84,21 @@ async function readMeta(): Promise<(CatalogueMeta & { prefix: string }) | null> 
   }
 }
 
-/** Reads multiple pages of a resource and concatenates them. */
+/** Reads multiple pages of a resource concurrently and concatenates them. */
 async function readPages<T>(prefix: string, resource: string, pageCount: number): Promise<T[] | null> {
-  if (pageCount <= 0 || pageCount > 200) return null // same backstop as mobile
-  const all: T[] = []
-  for (let i = 0; i < pageCount; i++) {
+  if (pageCount <= 0 || pageCount > 200) return null
+  const pagePromises = Array.from({ length: pageCount }, async (_, i) => {
     const raw = await redisGet(`${prefix}:${resource}:page:${i}`)
     if (!raw) return null
-    const page: T[] = JSON.parse(raw)
-    all.push(...page)
-  }
-  return all
+    try {
+      return JSON.parse(raw) as T[]
+    } catch {
+      return null
+    }
+  })
+  const results = await Promise.all(pagePromises)
+  if (results.some((r) => r === null)) return null
+  return results.flat() as T[]
 }
 
 /** Reads a resource stored under a single key. */

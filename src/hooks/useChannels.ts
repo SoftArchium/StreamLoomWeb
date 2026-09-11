@@ -29,7 +29,7 @@ interface UseChannelsResult {
 }
 
 // ---- LocalStorage catalogue cache ----
-const CACHE_KEY = 'sl_catalogue_v3'
+const CACHE_KEY = 'sl_catalogue_v4'
 const CACHE_TTL_MS = 60 * 60 * 1000 // 1 hour
 
 interface CacheEntry {
