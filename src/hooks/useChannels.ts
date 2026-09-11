@@ -7,6 +7,10 @@ import {
   fetchEpg,
 } from '../api/supabase'
 import type { Channel, Stream, Category, EpgProgram } from '../api/supabase'
+import {
+  fetchCatalogueFromRedis,
+  isUpstashConfigured,
+} from '../api/redis'
 
 export interface EnrichedChannel extends Channel {
   stream: Stream | undefined
@@ -20,16 +24,19 @@ interface UseChannelsResult {
   loading: boolean
   error: string | null
   refresh: () => void
+  /** Where catalogue data was last loaded from */
+  source: 'redis' | 'supabase' | 'cache' | null
 }
 
-// ---- LocalStorage cache ----
-const CACHE_KEY = 'sl_catalogue_v2'
+// ---- LocalStorage catalogue cache ----
+const CACHE_KEY = 'sl_catalogue_v3'
 const CACHE_TTL_MS = 60 * 60 * 1000 // 1 hour
 
 interface CacheEntry {
   channels: EnrichedChannel[]
   categories: Category[]
   epgIds: string[]
+  source: 'redis' | 'supabase'
   ts: number
 }
 
@@ -59,10 +66,28 @@ let _categories: Category[] | null = null
 let _epgIds: Set<string> | null = null
 let _loading = true
 let _error: string | null = null
+let _source: 'redis' | 'supabase' | 'cache' | null = null
 const _listeners = new Set<() => void>()
 
 function notify() {
   _listeners.forEach((fn) => fn())
+}
+
+function enrichChannels(
+  rawChannels: { id: string; name: string; logo: string | null; country: string | null; is_active: boolean; channel_categories: { category_id: string }[] }[],
+  streams: { channel_id: string | null; url: string; quality: string | null; status: string | null }[]
+): EnrichedChannel[] {
+  const streamMap = new Map<string, Stream>()
+  for (const s of streams) {
+    if (s.channel_id && !streamMap.has(s.channel_id)) {
+      streamMap.set(s.channel_id, s as Stream)
+    }
+  }
+  return rawChannels.map((ch) => ({
+    ...(ch as Channel),
+    stream: streamMap.get(ch.id),
+    categoryIds: ch.channel_categories.map((c) => c.category_id),
+  }))
 }
 
 async function loadData(force = false) {
@@ -76,9 +101,10 @@ async function loadData(force = false) {
       _channels = cached.channels
       _categories = cached.categories
       _epgIds = new Set(cached.epgIds)
+      _source = 'cache'
       _loading = false
       notify()
-      // Then refresh in background silently
+      // Refresh in background silently
       loadData(true).catch(() => {})
       return
     }
@@ -88,7 +114,30 @@ async function loadData(force = false) {
   notify()
 
   try {
-    // Parallel fetch — all 4 requests fire at once
+    // --- Tier 1: Try Upstash Redis first (same strategy as mobile ADR-0015) ---
+    const redisResult = await fetchCatalogueFromRedis()
+
+    if (redisResult) {
+      // Redis hit — build enriched channels
+      const enriched = enrichChannels(redisResult.channels, redisResult.streams)
+      const cats = redisResult.categories as Category[]
+
+      // EPG IDs still come from Supabase Storage (not in Redis)
+      const epgIds = await fetchEpgChannelIds()
+
+      _channels = enriched
+      _categories = cats
+      _epgIds = epgIds
+      _source = 'redis'
+      _loading = false
+      _error = null
+
+      writeCache({ channels: enriched, categories: cats, epgIds: [...epgIds], source: 'redis' })
+      notify()
+      return
+    }
+
+    // --- Tier 2: Fall through to Supabase PostgREST ---
     const [rawChannels, streams, cats, epgIds] = await Promise.all([
       fetchChannels(),
       fetchStreams(),
@@ -96,26 +145,16 @@ async function loadData(force = false) {
       fetchEpgChannelIds(),
     ])
 
-    const streamMap = new Map<string, Stream>()
-    for (const s of streams) {
-      if (s.channel_id && !streamMap.has(s.channel_id)) {
-        streamMap.set(s.channel_id, s)
-      }
-    }
-
-    const enriched: EnrichedChannel[] = rawChannels.map((ch) => ({
-      ...ch,
-      stream: streamMap.get(ch.id),
-      categoryIds: ch.channel_categories.map((c) => c.category_id),
-    }))
+    const enriched = enrichChannels(rawChannels, streams)
 
     _channels = enriched
     _categories = cats
     _epgIds = epgIds
+    _source = 'supabase'
     _loading = false
     _error = null
 
-    writeCache({ channels: enriched, categories: cats, epgIds: [...epgIds] })
+    writeCache({ channels: enriched, categories: cats, epgIds: [...epgIds], source: 'supabase' })
     notify()
   } catch (e) {
     _error = (e as Error).message
@@ -145,6 +184,7 @@ export function useChannels(): UseChannelsResult {
     loading: _loading,
     error: _error,
     refresh,
+    source: _source,
   }
 }
 
@@ -255,3 +295,7 @@ export function useRecent() {
 
   return { recentIds: _recent, addRecent }
 }
+
+// ---- Debug helper ----
+export function getDataSource() { return _source }
+export function getUpstashConfigured() { return isUpstashConfigured }

@@ -2,10 +2,11 @@ import { useState, useEffect, useCallback } from 'react'
 import { pingCloudflareDns } from '../util/dns'
 import type { DnsPingResult } from '../util/dns'
 import { useChannels } from '../hooks/useChannels'
+import { isUpstashConfigured } from '../api/redis'
 import './Settings.css'
 
 export function Settings() {
-  const { channels, refresh } = useChannels()
+  const { channels, refresh, source } = useChannels()
   const [dnsPing, setDnsPing] = useState<DnsPingResult | null>(null)
   const [pinging, setPinging] = useState(false)
   const [lowLatency, setLowLatency] = useState(() => {
@@ -135,15 +136,33 @@ export function Settings() {
           <div className="settings-card__header">
             <span className="settings-card__icon">💾</span>
             <div>
-              <h3>Catalogue Cache</h3>
-              <p>Manage locally cached channels and stream indexes</p>
+              <h3>Catalogue Cache & Data Architecture</h3>
+              <p>Upstash Redis Edge caching (ADR-0015) with Supabase PostgREST fallback</p>
             </div>
           </div>
           <div className="settings-card__body">
             <div className="settings-item">
               <div className="settings-item__info">
+                <strong>Active Data Source</strong>
+                <span>
+                  {source === 'redis'
+                    ? '⚡ Upstash Redis Edge (Ultra-low latency snapshot)'
+                    : source === 'cache'
+                    ? '⚡ Instant Local Storage (Revalidating)'
+                    : source === 'supabase'
+                    ? 'Supabase PostgREST (Direct database query)'
+                    : 'Connecting to catalogue…'}
+                </span>
+              </div>
+              <span className={`badge ${source === 'redis' || source === 'cache' ? 'badge--success' : 'badge--info'}`}>
+                {isUpstashConfigured ? 'Upstash Enabled' : 'Supabase Only'}
+              </span>
+            </div>
+
+            <div className="settings-item">
+              <div className="settings-item__info">
                 <strong>Cached Channels</strong>
-                <span>{channels.length} channels indexed locally</span>
+                <span>{channels.length} channels loaded & indexed</span>
               </div>
               <button
                 className="settings-btn settings-btn--danger"
