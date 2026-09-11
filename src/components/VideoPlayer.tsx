@@ -4,6 +4,7 @@ import Hls from 'hls.js'
 import type { EnrichedChannel } from '../hooks/useChannels'
 import type { EpgProgram } from '../api/supabase'
 import { useEpg, useFavourites, useRecent } from '../hooks/useChannels'
+import { formatCountryDisplay } from '../util/country'
 import './VideoPlayer.css'
 
 interface Props {
@@ -37,24 +38,19 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
   const [showChannelList, setShowChannelList] = useState(false)
   const [showHud, setShowHud] = useState(true)
   const hideHudTimer = useRef<number | null>(null)
+  const connectionTimeoutTimer = useRef<number | null>(null)
+
+  const isHudVisible = showHud || isBuffering
 
   const resetHudTimer = useCallback(() => {
     setShowHud(true)
     if (hideHudTimer.current) window.clearTimeout(hideHudTimer.current)
-    hideHudTimer.current = window.setTimeout(() => {
-      setShowHud(false)
-    }, 4000)
-  }, [])
-
-  useEffect(() => {
-    if (hideHudTimer.current) window.clearTimeout(hideHudTimer.current)
-    hideHudTimer.current = window.setTimeout(() => {
-      setShowHud(false)
-    }, 4000)
-    return () => {
-      if (hideHudTimer.current) window.clearTimeout(hideHudTimer.current)
+    if (!isBuffering) {
+      hideHudTimer.current = window.setTimeout(() => {
+        setShowHud(false)
+      }, isFullscreen ? 1800 : 3500)
     }
-  }, [channel.id])
+  }, [isBuffering, isFullscreen])
 
   const streamUrl = channel.stream?.url
 
@@ -140,6 +136,20 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
 
   // Switch channel preserving the active playlist and return path
   const switchChannel = useCallback((target: EnrichedChannel) => {
+    // Immediately stop current HLS loader and media buffer to prevent lockup
+    if (hlsRef.current) {
+      hlsRef.current.stopLoad()
+      hlsRef.current.detachMedia()
+      hlsRef.current.destroy()
+      hlsRef.current = null
+    }
+    const video = videoRef.current
+    if (video) {
+      video.pause()
+      video.removeAttribute('src')
+      video.load()
+    }
+
     sessionStorage.setItem('sl_last_viewed', target.id)
     const playlistIds = allChannels.map((c) => c.id)
     try {
@@ -156,6 +166,18 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
 
   // Return to the exact screen entered from and target the last watched channel
   const handleBack = useCallback(() => {
+    if (hlsRef.current) {
+      hlsRef.current.stopLoad()
+      hlsRef.current.detachMedia()
+      hlsRef.current.destroy()
+      hlsRef.current = null
+    }
+    const video = videoRef.current
+    if (video) {
+      video.pause()
+      video.removeAttribute('src')
+      video.load()
+    }
     sessionStorage.setItem('sl_last_viewed', channel.id)
     navigate(returnTo, { state: { targetChannelId: channel.id } })
   }, [channel.id, returnTo, navigate])
@@ -175,14 +197,24 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
     return allChannels[0]
   }, [allChannels, channelIdx])
 
+  const [isSlowConnecting, setIsSlowConnecting] = useState(false)
+
   const loadStream = useCallback((url: string) => {
     const video = videoRef.current
     if (!video) return
 
     setIsBuffering(true)
+    setIsSlowConnecting(false)
     setHasError(false)
 
+    if (connectionTimeoutTimer.current) window.clearTimeout(connectionTimeoutTimer.current)
+    connectionTimeoutTimer.current = window.setTimeout(() => {
+      setIsSlowConnecting(true)
+    }, 6000)
+
     if (hlsRef.current) {
+      hlsRef.current.stopLoad()
+      hlsRef.current.detachMedia()
       hlsRef.current.destroy()
       hlsRef.current = null
     }
@@ -192,26 +224,26 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
       const hls = new Hls({
         enableWorker: true,
         lowLatencyMode: isLowLatency,
-        backBufferLength: 30,
-        maxBufferLength: 30,
-        maxMaxBufferLength: 60,
-        maxBufferSize: 30 * 1000 * 1000,
+        backBufferLength: 15,
+        maxBufferLength: 15,
+        maxMaxBufferLength: 30,
+        maxBufferSize: 15 * 1024 * 1024,
         maxBufferHole: 0.5,
         highBufferWatchdogPeriod: 2,
         nudgeOffset: 0.1,
-        nudgeMaxRetry: 5,
-        liveSyncDurationCount: 3,
-        liveMaxLatencyDurationCount: 6,
+        nudgeMaxRetry: 3,
+        liveSyncDurationCount: 2,
+        liveMaxLatencyDurationCount: 4,
         startFragPrefetch: true,
         startLevel: -1,
         abrEwmaDefaultEstimate: 5_000_000,
-        manifestLoadingTimeOut: 10000,
-        manifestLoadingMaxRetry: 5,
-        manifestLoadingRetryDelay: 500,
-        levelLoadingTimeOut: 10000,
-        fragLoadingTimeOut: 15000,
-        fragLoadingMaxRetry: 6,
-        fragLoadingRetryDelay: 500,
+        manifestLoadingTimeOut: 5000,
+        manifestLoadingMaxRetry: 2,
+        manifestLoadingRetryDelay: 400,
+        levelLoadingTimeOut: 5000,
+        fragLoadingTimeOut: 6000,
+        fragLoadingMaxRetry: 2,
+        fragLoadingRetryDelay: 400,
       })
 
       hls.loadSource(url)
@@ -219,6 +251,8 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
 
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
         setIsBuffering(false)
+        setIsSlowConnecting(false)
+        if (connectionTimeoutTimer.current) window.clearTimeout(connectionTimeoutTimer.current)
         video.play().catch(() => {
           setIsPlaying(false)
         })
@@ -226,6 +260,8 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
 
       hls.on(Hls.Events.FRAG_BUFFERED, () => {
         setIsBuffering(false)
+        setIsSlowConnecting(false)
+        if (connectionTimeoutTimer.current) window.clearTimeout(connectionTimeoutTimer.current)
       })
 
       hls.on(Hls.Events.ERROR, (_, data) => {
@@ -240,6 +276,8 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
             default:
               setHasError(true)
               setIsBuffering(false)
+              setIsSlowConnecting(false)
+              if (connectionTimeoutTimer.current) window.clearTimeout(connectionTimeoutTimer.current)
               hls.destroy()
               break
           }
@@ -251,24 +289,39 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
       video.src = url
       video.addEventListener('loadedmetadata', () => {
         setIsBuffering(false)
+        setIsSlowConnecting(false)
+        if (connectionTimeoutTimer.current) window.clearTimeout(connectionTimeoutTimer.current)
         video.play().catch(() => setIsPlaying(false))
       })
       video.addEventListener('error', () => {
         setHasError(true)
         setIsBuffering(false)
+        setIsSlowConnecting(false)
+        if (connectionTimeoutTimer.current) window.clearTimeout(connectionTimeoutTimer.current)
       })
     }
   }, [])
 
   useEffect(() => {
+    const video = videoRef.current
     if (streamUrl) {
       loadStream(streamUrl)
       addRecent(channel.id)
       sessionStorage.setItem('sl_last_viewed', channel.id)
     }
     return () => {
-      hlsRef.current?.destroy()
-      hlsRef.current = null
+      if (connectionTimeoutTimer.current) window.clearTimeout(connectionTimeoutTimer.current)
+      if (hlsRef.current) {
+        hlsRef.current.stopLoad()
+        hlsRef.current.detachMedia()
+        hlsRef.current.destroy()
+        hlsRef.current = null
+      }
+      if (video) {
+        video.pause()
+        video.removeAttribute('src')
+        video.load()
+      }
     }
   }, [streamUrl, loadStream, addRecent, channel.id])
 
@@ -316,7 +369,7 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
 
   return (
     <div
-      className={`player ${showHud ? 'player--hud-visible' : ''} ${isFullscreen ? 'player--fullscreen' : ''}`}
+      className={`player ${isHudVisible ? 'player--hud-visible' : ''} ${isFullscreen ? 'player--fullscreen' : ''}`}
       ref={containerRef}
       onMouseMove={handleMouseMove}
       onTouchStart={handleMouseMove}
@@ -336,9 +389,43 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
 
       {/* Buffering Indicator */}
       {isBuffering && !hasError && (
-        <div className="player__state-overlay">
+        <div className="player__state-overlay player__state-overlay--connecting">
           <div className="guide-loader" />
-          <span>Connecting stream…</span>
+          <div className="player__connecting-content">
+            <p className="player__connecting-title">
+              {isSlowConnecting ? 'Stream is slow to respond' : `Connecting to ${channel.name}…`}
+            </p>
+            {isSlowConnecting && (
+              <p className="player__connecting-sub">This stream might be experiencing high latency.</p>
+            )}
+          </div>
+          <div className="player__connecting-actions">
+            {nextChannel && (
+              <button
+                className="player__overlay-btn player__overlay-btn--skip"
+                onClick={() => switchChannel(nextChannel)}
+                aria-label="Skip to next channel"
+              >
+                Skip Channel ⏭
+              </button>
+            )}
+            {streamUrl && isSlowConnecting && (
+              <button
+                className="player__overlay-btn player__overlay-btn--retry"
+                onClick={() => loadStream(streamUrl)}
+                aria-label="Retry connection"
+              >
+                Retry ↺
+              </button>
+            )}
+            <button
+              className="player__overlay-btn player__overlay-btn--back"
+              onClick={handleBack}
+              aria-label="Back to channels"
+            >
+              ← Back
+            </button>
+          </div>
         </div>
       )}
 
@@ -502,7 +589,7 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
                   <div className="player__drawer-initials">{c.name.slice(0, 2).toUpperCase()}</div>
                 )}
                 <span className="player__drawer-name">{c.name}</span>
-                {c.country && <span className="player__drawer-badge">{c.country}</span>}
+                {c.country && <span className="player__drawer-badge">{formatCountryDisplay(c.country)}</span>}
               </div>
             ))}
           </div>

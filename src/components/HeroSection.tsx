@@ -1,30 +1,32 @@
-import { useEffect, useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import type { EnrichedChannel } from '../hooks/useChannels'
+import { formatCountryDisplay } from '../util/country'
 import './HeroSection.css'
 
 interface Props {
   channels: EnrichedChannel[]
 }
 
-const CYCLE_INTERVAL = 8000
-
 export function HeroSection({ channels }: Props) {
-  const [idx, setIdx] = useState(0)
   const navigate = useNavigate()
+  const [index, setIndex] = useState(0)
 
-  // Pick up to 8 channels with logos for the hero
-  const heroChannels = channels.filter((ch) => ch.logo && ch.stream).slice(0, 8)
+  // Rotate every 8 seconds across top 5 channels with streams & logos
+  const heroChannels = channels.filter((c) => c.stream && c.logo).slice(0, 5)
 
   useEffect(() => {
     if (heroChannels.length <= 1) return
-    const id = setInterval(() => setIdx((i) => (i + 1) % heroChannels.length), CYCLE_INTERVAL)
+    const id = setInterval(() => {
+      setIndex((i) => (i + 1) % heroChannels.length)
+    }, 8000)
     return () => clearInterval(id)
   }, [heroChannels.length])
 
-  if (heroChannels.length === 0) return null
+  const featured = heroChannels[index]
+  if (!featured) return null
 
-  const featured = heroChannels[idx]
+  const countryDisplay = formatCountryDisplay(featured.country)
 
   return (
     <section className="hero noise">
@@ -40,9 +42,9 @@ export function HeroSection({ channels }: Props) {
           {featured.logo && <img src={featured.logo} alt={featured.name} className="hero__logo" />}
         </div>
         <h1 className="hero__name">{featured.name}</h1>
-        {featured.country && (
+        {countryDisplay && (
           <p className="hero__meta">
-            <span className="hero__badge">{featured.country.toUpperCase()}</span>
+            <span className="hero__badge">{countryDisplay}</span>
           </p>
         )}
         <div className="hero__actions">
@@ -74,8 +76,8 @@ export function HeroSection({ channels }: Props) {
         {heroChannels.map((_, i) => (
           <button
             key={i}
-            className={`hero__dot ${i === idx ? 'hero__dot--active' : ''}`}
-            onClick={() => setIdx(i)}
+            className={`hero__dot ${i === index ? 'hero__dot--active' : ''}`}
+            onClick={() => setIndex(i)}
             aria-label={`Show channel ${i + 1}`}
           />
         ))}

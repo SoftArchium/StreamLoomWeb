@@ -15,6 +15,7 @@
 }
 
 /* Overlays (Buffering & Error) */
+/* Overlays (Buffering & Error) */
 .player__state-overlay {
   position: absolute;
   inset: 0;
@@ -22,32 +23,83 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  background: rgba(0, 0, 0, 0.65);
+  background: rgba(0, 0, 0, 0.7);
   color: white;
   gap: 16px;
   z-index: 5;
   pointer-events: none;
+  text-align: center;
+  padding: 20px;
+}
+
+.player__state-overlay--connecting,
+.player__state-overlay--error {
+  pointer-events: auto;
 }
 
 .player__state-overlay--error {
-  pointer-events: auto;
-  background: rgba(0, 0, 0, 0.85);
+  background: rgba(0, 0, 0, 0.88);
+}
+
+.player__connecting-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.player__connecting-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: #fff;
+  letter-spacing: -0.2px;
+}
+
+.player__connecting-sub {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.player__connecting-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: center;
+  margin-top: 4px;
 }
 
 .player__overlay-btn {
-  padding: 8px 20px;
+  padding: 9px 20px;
   background: var(--accent-gradient);
   color: white;
   border: none;
   border-radius: var(--radius-full);
-  font-weight: 600;
-  font-size: 0.9rem;
+  font-weight: 700;
+  font-size: 0.88rem;
   cursor: pointer;
-  transition: transform 0.2s;
+  transition: all 0.2s ease;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
 }
 
 .player__overlay-btn:hover {
-  transform: scale(1.05);
+  transform: translateY(-2px) scale(1.03);
+  box-shadow: 0 6px 20px rgba(108, 92, 231, 0.4);
+}
+
+.player__overlay-btn--back {
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  backdrop-filter: blur(10px);
+}
+
+.player__overlay-btn--back:hover {
+  background: rgba(255, 255, 255, 0.22);
+}
+
+.player__overlay-btn--retry {
+  background: rgba(255, 255, 255, 0.16);
+  border: 1px solid rgba(255, 255, 255, 0.25);
 }
 
 /* Shared HUD styles */

@@ -3,6 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom'
 import type { EnrichedChannel } from '../hooks/useChannels'
 import type { EpgProgram } from '../api/supabase'
 import { useFavourites } from '../hooks/useChannels'
+import { formatCountryDisplay } from '../util/country'
 import './ChannelCard.css'
 
 interface Props {
@@ -44,6 +45,8 @@ export function ChannelCard({ channel, nowPlaying, size = 'medium', onWatch, pla
     e.preventDefault()
     toggle(channel.id)
   }, [channel.id, toggle])
+
+  const countryDisplay = formatCountryDisplay(channel.country)
 
   return (
     <article
@@ -94,14 +97,14 @@ export function ChannelCard({ channel, nowPlaying, size = 'medium', onWatch, pla
       </div>
 
       <div className="channel-card__info">
-        <p className="channel-card__name">{channel.name}</p>
+        <p className="channel-card__name" title={channel.name}>{channel.name}</p>
         {nowPlaying ? (
           <p className="channel-card__epg" title={nowPlaying.title}>
             <span className="live-dot" style={{ marginRight: 6 }} />
-            {nowPlaying.title}
+            <span className="channel-card__epg-text">{nowPlaying.title}</span>
           </p>
-        ) : channel.country ? (
-          <p className="channel-card__country">{channel.country.toUpperCase()}</p>
+        ) : countryDisplay ? (
+          <p className="channel-card__country" title={countryDisplay}>{countryDisplay}</p>
         ) : null}
       </div>
     </article>

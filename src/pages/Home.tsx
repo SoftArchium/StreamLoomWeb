@@ -6,7 +6,9 @@ import { HeroSection } from '../components/HeroSection'
 import { CategoryRow } from '../components/CategoryRow'
 import { SearchBar } from '../components/SearchBar'
 import { ChannelCard } from '../components/ChannelCard'
+import { FilterSheet } from '../components/FilterSheet'
 import { useKeyboardNav } from '../hooks/useKeyboardNav'
+import { getCountryName, getCountryFlag, formatCountryDisplay } from '../util/country'
 import './Home.css'
 
 const PRIORITY_CATEGORIES = ['music', 'movies', 'cartoons', 'comedy', 'news', 'sports']
@@ -32,8 +34,6 @@ const CATEGORY_ICONS: Record<string, string> = {
   classic: '📻',
   business: '💼',
 }
-
-const RESOLUTIONS = ['All Quality', '4K', 'FHD (1080p)', 'HD (720p)', 'SD']
 
 function matchQuality(quality: string | null | undefined, filter: string): boolean {
   if (!filter || filter === 'All Quality') return true
@@ -61,69 +61,115 @@ export function Home() {
   const [selectedQuality, setSelectedQuality] = useState<string>(() => sessionStorage.getItem('sl_active_quality') || 'All Quality')
   const [showFavOnly, setShowFavOnly] = useState<boolean>(() => sessionStorage.getItem('sl_active_fav') === 'true')
   const [userExpandedLimit, setUserExpandedLimit] = useState(0)
+  const [isFilterSheetOpen, setIsFilterSheetOpen] = useState(false)
 
   const categoriesScrollRef = useRef<HTMLDivElement>(null)
 
   const playableChannels = useMemo(() => channels.filter((c) => c.stream), [channels])
 
-  // Pre-index channels by category once for O(1) lookups
-  const channelsByCategory = useMemo(() => {
-    const map = new Map<string, EnrichedChannel[]>()
-    for (const ch of playableChannels) {
-      for (const catId of ch.categoryIds) {
-        let list = map.get(catId)
-        if (!list) {
-          list = []
-          map.set(catId, list)
-        }
-        list.push(ch)
+  // Helper to filter channels with optional exclusions (for faceted filtering)
+  const filterChannels = useCallback(
+    (exclude: 'country' | 'category' | 'quality' | 'fav' | 'none' = 'none'): EnrichedChannel[] => {
+      let list = playableChannels
+      if (showFavOnly && exclude !== 'fav') {
+        list = list.filter((ch) => favouriteIds.has(ch.id))
+      }
+      if (selectedCountry && exclude !== 'country') {
+        list = list.filter((ch) => ch.country === selectedCountry)
+      }
+      if (selectedCategory && exclude !== 'category') {
+        list = list.filter((ch) => ch.categoryIds.includes(selectedCategory))
+      }
+      if (selectedQuality !== 'All Quality' && exclude !== 'quality') {
+        list = list.filter((ch) => matchQuality(ch.stream?.quality, selectedQuality))
+      }
+      const q = search.trim().toLowerCase()
+      if (q) {
+        list = list.filter(
+          (ch) =>
+            ch.name.toLowerCase().includes(q) ||
+            (ch.country ?? '').toLowerCase().includes(q) ||
+            getCountryName(ch.country).toLowerCase().includes(q)
+        )
+      }
+      return list
+    },
+    [playableChannels, showFavOnly, favouriteIds, selectedCountry, selectedCategory, selectedQuality, search]
+  )
+
+  // 1. Faceted Countries: only countries having channels in current subset, with full names & flags
+  const availableCountries = useMemo(() => {
+    const subset = filterChannels('country')
+    const counts = new Map<string, number>()
+    for (const ch of subset) {
+      if (ch.country) {
+        counts.set(ch.country, (counts.get(ch.country) ?? 0) + 1)
       }
     }
-    return map
-  }, [playableChannels])
+    return [...counts.keys()]
+      .sort((a, b) => getCountryName(a).localeCompare(getCountryName(b)))
+      .map((code) => ({
+        code,
+        name: getCountryName(code),
+        flag: getCountryFlag(code),
+        count: counts.get(code) ?? 0,
+      }))
+  }, [filterChannels])
 
-  // Prioritized category list (Music, Movies, Cartoons, Comedy, News, Sports first)
-  const sortedCategories = useMemo(() => {
-    const available = categories.filter((c) => (channelsByCategory.get(c.id)?.length ?? 0) > 0)
-    return available.sort((a, b) => {
-      const aIndex = PRIORITY_CATEGORIES.indexOf(a.id.toLowerCase())
-      const bIndex = PRIORITY_CATEGORIES.indexOf(b.id.toLowerCase())
-      if (aIndex !== -1 && bIndex !== -1) return aIndex - bIndex
-      if (aIndex !== -1) return -1
-      if (bIndex !== -1) return 1
-      return a.name.localeCompare(b.name)
-    })
-  }, [categories, channelsByCategory])
+  // 2. Faceted Categories: only categories with channels in current subset, with dynamic counts
+  const availableCategories = useMemo(() => {
+    const subset = filterChannels('category')
+    const counts = new Map<string, number>()
+    for (const ch of subset) {
+      for (const catId of ch.categoryIds) {
+        counts.set(catId, (counts.get(catId) ?? 0) + 1)
+      }
+    }
+    return categories
+      .filter((cat) => (counts.get(cat.id) ?? 0) > 0)
+      .map((cat) => ({
+        id: cat.id,
+        name: cat.name,
+        count: counts.get(cat.id) ?? 0,
+      }))
+      .sort((a, b) => {
+        const aIndex = PRIORITY_CATEGORIES.indexOf(a.id.toLowerCase())
+        const bIndex = PRIORITY_CATEGORIES.indexOf(b.id.toLowerCase())
+        if (aIndex !== -1 && bIndex !== -1) return aIndex - bIndex
+        if (aIndex !== -1) return -1
+        if (bIndex !== -1) return 1
+        return a.name.localeCompare(b.name)
+      })
+  }, [categories, filterChannels])
 
-  // Distinct countries (non-null, sorted)
-  const countries = useMemo(() => {
-    const set = new Set<string>()
-    for (const ch of playableChannels) if (ch.country) set.add(ch.country)
-    return [...set].sort()
-  }, [playableChannels])
-
-  // Active filtered set
-  const baseFiltered = useMemo(() => {
-    let result = playableChannels
-    if (showFavOnly) result = result.filter((ch) => favouriteIds.has(ch.id))
-    if (selectedCountry) result = result.filter((ch) => ch.country === selectedCountry)
-    if (selectedCategory) result = result.filter((ch) => ch.categoryIds.includes(selectedCategory))
-    if (selectedQuality !== 'All Quality') {
-      result = result.filter((ch) => matchQuality(ch.stream?.quality, selectedQuality))
+  // 3. Faceted Qualities: only qualities with channels in current subset
+  const availableQualities = useMemo(() => {
+    const subset = filterChannels('quality')
+    const result = ['All Quality']
+    const options = ['4K', 'FHD (1080p)', 'HD (720p)', 'SD']
+    for (const opt of options) {
+      if (subset.some((ch) => matchQuality(ch.stream?.quality, opt))) {
+        result.push(opt)
+      }
     }
     return result
-  }, [playableChannels, showFavOnly, selectedCountry, selectedCategory, selectedQuality, favouriteIds])
+  }, [filterChannels])
 
-  // Search filtered set
-  const searched = useMemo(() => {
-    const q = search.trim().toLowerCase()
-    if (!q) return null
-    return baseFiltered.filter(
-      (ch) =>
-        ch.name.toLowerCase().includes(q) ||
-        (ch.country ?? '').toLowerCase().includes(q)
-    )
-  }, [search, baseFiltered])
+  // Final filtered list of channels
+  const activeGridChannels = useMemo(() => filterChannels('none'), [filterChannels])
+
+  // Derive effective filter values ensuring they are valid within available faceted options
+  const effectiveCountry = useMemo(() => {
+    return selectedCountry && availableCountries.some((c) => c.code === selectedCountry) ? selectedCountry : null
+  }, [selectedCountry, availableCountries])
+
+  const effectiveCategory = useMemo(() => {
+    return selectedCategory && availableCategories.some((c) => c.id === selectedCategory) ? selectedCategory : null
+  }, [selectedCategory, availableCategories])
+
+  const effectiveQuality = useMemo(() => {
+    return availableQualities.includes(selectedQuality) ? selectedQuality : 'All Quality'
+  }, [selectedQuality, availableQualities])
 
   const favouriteChannels = useMemo(
     () => playableChannels.filter((ch) => favouriteIds.has(ch.id)),
@@ -147,19 +193,19 @@ export function Home() {
   }, [search])
 
   useEffect(() => {
-    if (selectedCategory) sessionStorage.setItem('sl_active_cat', selectedCategory)
+    if (effectiveCategory) sessionStorage.setItem('sl_active_cat', effectiveCategory)
     else sessionStorage.removeItem('sl_active_cat')
-  }, [selectedCategory])
+  }, [effectiveCategory])
 
   useEffect(() => {
-    if (selectedCountry) sessionStorage.setItem('sl_active_country', selectedCountry)
+    if (effectiveCountry) sessionStorage.setItem('sl_active_country', effectiveCountry)
     else sessionStorage.removeItem('sl_active_country')
-  }, [selectedCountry])
+  }, [effectiveCountry])
 
   useEffect(() => {
-    if (selectedQuality && selectedQuality !== 'All Quality') sessionStorage.setItem('sl_active_quality', selectedQuality)
+    if (effectiveQuality && effectiveQuality !== 'All Quality') sessionStorage.setItem('sl_active_quality', effectiveQuality)
     else sessionStorage.removeItem('sl_active_quality')
-  }, [selectedQuality])
+  }, [effectiveQuality])
 
   useEffect(() => {
     if (showFavOnly) sessionStorage.setItem('sl_active_fav', 'true')
@@ -180,7 +226,7 @@ export function Home() {
     sessionStorage.removeItem('sl_active_search')
   }, [])
 
-  // Reset expanded limit when filters change without triggering effect cascade
+  // Reset expanded limit when filters change
   const filterKey = `${selectedCategory}-${selectedCountry}-${selectedQuality}-${showFavOnly}-${search}`
   const [prevFilterKey, setPrevFilterKey] = useState(filterKey)
   if (prevFilterKey !== filterKey) {
@@ -208,21 +254,26 @@ export function Home() {
   useKeyboardNav({ onEscape: clearFilters })
 
   const hasActiveFilter =
-    Boolean(selectedCategory) ||
-    Boolean(selectedCountry) ||
-    selectedQuality !== 'All Quality' ||
+    Boolean(effectiveCategory) ||
+    Boolean(effectiveCountry) ||
+    effectiveQuality !== 'All Quality' ||
     showFavOnly ||
-    Boolean(search)
+    Boolean(search.trim())
 
-  const activeGridChannels = searched !== null ? searched : baseFiltered
-  const isGridMode = hasActiveFilter || searched !== null
+  const activeFilterCount =
+    (effectiveCountry ? 1 : 0) +
+    (effectiveCategory ? 1 : 0) +
+    (effectiveQuality !== 'All Quality' ? 1 : 0) +
+    (showFavOnly ? 1 : 0)
+
+  const isGridMode = hasActiveFilter || Boolean(search.trim())
   const activeGridPlaylist = useMemo(() => activeGridChannels.map((c) => c.id), [activeGridChannels])
 
   const targetId =
     (location.state as { targetChannelId?: string } | null)?.targetChannelId ||
     sessionStorage.getItem('sl_last_viewed')
 
-  // Calculate effective gridLimit during render (ensures returning channel is rendered in DOM)
+  // Calculate effective gridLimit during render
   const gridLimit = useMemo(() => {
     let base = GRID_BATCH_SIZE + userExpandedLimit
     if (isGridMode && targetId) {
@@ -249,6 +300,22 @@ export function Home() {
 
     return () => clearTimeout(timer)
   }, [targetId, playableChannels.length])
+
+  // Pre-index channels by category for row mode lookups
+  const channelsByCategory = useMemo(() => {
+    const map = new Map<string, EnrichedChannel[]>()
+    for (const ch of playableChannels) {
+      for (const catId of ch.categoryIds) {
+        let list = map.get(catId)
+        if (!list) {
+          list = []
+          map.set(catId, list)
+        }
+        list.push(ch)
+      }
+    }
+    return map
+  }, [playableChannels])
 
   if (error) {
     return (
@@ -282,10 +349,60 @@ export function Home() {
 
           {/* Filter / search toolbar */}
           <div className="home-toolbar">
-            <SearchBar value={search} onChange={setSearch} resultCount={searched?.length} />
+            <div className="home-search-line">
+              <SearchBar
+                value={search}
+                onChange={setSearch}
+                resultCount={search.trim() ? activeGridChannels.length : undefined}
+              />
+              <button
+                className={`home-filter-btn ${activeFilterCount > 0 ? 'home-filter-btn--active' : ''}`}
+                onClick={() => setIsFilterSheetOpen(true)}
+                aria-label="Open filter settings"
+                title="Filter channels by country, category, resolution"
+              >
+                <span>🎛️ Filters</span>
+                {activeFilterCount > 0 && (
+                  <span className="home-filter-btn__badge">{activeFilterCount}</span>
+                )}
+              </button>
+            </div>
+
+            {/* Active Filter Chips */}
+            {hasActiveFilter && (
+              <div className="home-active-chips">
+                {showFavOnly && (
+                  <button className="active-chip" onClick={() => setShowFavOnly(false)}>
+                    <span>♥ Favourites</span>
+                    <span className="active-chip__remove">✕</span>
+                  </button>
+                )}
+                {effectiveCountry && (
+                  <button className="active-chip" onClick={() => setSelectedCountry(null)}>
+                    <span>{formatCountryDisplay(effectiveCountry)}</span>
+                    <span className="active-chip__remove">✕</span>
+                  </button>
+                )}
+                {effectiveCategory && (
+                  <button className="active-chip" onClick={() => setSelectedCategory(null)}>
+                    <span>{categories.find((c) => c.id === effectiveCategory)?.name ?? effectiveCategory}</span>
+                    <span className="active-chip__remove">✕</span>
+                  </button>
+                )}
+                {effectiveQuality !== 'All Quality' && (
+                  <button className="active-chip" onClick={() => setSelectedQuality('All Quality')}>
+                    <span>📺 {effectiveQuality}</span>
+                    <span className="active-chip__remove">✕</span>
+                  </button>
+                )}
+                <button className="active-chip__clear-all" onClick={clearFilters}>
+                  Clear all
+                </button>
+              </div>
+            )}
 
             <div className="home-filters-row">
-              {/* Quick toggles */}
+              {/* Quick Desktop select dropdowns */}
               <div className="home-quick-filters">
                 <button
                   className={`filter-pill ${showFavOnly ? 'filter-pill--active' : ''}`}
@@ -298,62 +415,60 @@ export function Home() {
                   )}
                 </button>
 
-                {/* Quality / Resolution select */}
+                {/* Desktop Quality Select */}
                 <div className="filter-select-wrap">
                   <select
-                    className={`filter-select ${selectedQuality !== 'All Quality' ? 'filter-select--active' : ''}`}
-                    value={selectedQuality}
+                    className={`filter-select ${effectiveQuality !== 'All Quality' ? 'filter-select--active' : ''}`}
+                    value={effectiveQuality}
                     onChange={(e) => setSelectedQuality(e.target.value)}
+                    aria-label="Filter by quality"
                   >
-                    {RESOLUTIONS.map((r) => (
+                    {availableQualities.map((r) => (
                       <option key={r} value={r}>📺 {r}</option>
                     ))}
                   </select>
                   <span className="filter-select-arrow">▼</span>
                 </div>
 
-                {/* Country picker */}
+                {/* Desktop Country Select with Flags and Full Names */}
                 <div className="filter-select-wrap">
                   <select
-                    className={`filter-select ${selectedCountry ? 'filter-select--active' : ''}`}
-                    value={selectedCountry ?? ''}
+                    className={`filter-select ${effectiveCountry ? 'filter-select--active' : ''}`}
+                    value={effectiveCountry ?? ''}
                     onChange={(e) => setSelectedCountry(e.target.value || null)}
+                    aria-label="Filter by country"
                   >
-                    <option value="">🌍 All Countries</option>
-                    {countries.map((c) => (
-                      <option key={c} value={c}>{c.toUpperCase()}</option>
+                    <option value="">🌍 All Countries ({availableCountries.length})</option>
+                    {availableCountries.map((c) => (
+                      <option key={c.code} value={c.code}>
+                        {c.flag} {c.name} ({c.count})
+                      </option>
                     ))}
                   </select>
                   <span className="filter-select-arrow">▼</span>
                 </div>
-
-                {/* Clear filters */}
-                {hasActiveFilter && (
-                  <button className="filter-pill filter-pill--clear" onClick={clearFilters} title="Reset all filters">
-                    ✕ Clear
-                  </button>
-                )}
               </div>
 
               {/* Horizontally scrollable category track */}
-              <div className="home-categories-scroll" ref={categoriesScrollRef}>
-                {sortedCategories.map((cat) => {
-                  const count = channelsByCategory.get(cat.id)?.length ?? 0
-                  const isActive = selectedCategory === cat.id
-                  const icon = CATEGORY_ICONS[cat.id.toLowerCase()] || '📺'
-                  return (
-                    <button
-                      key={cat.id}
-                      className={`filter-pill ${isActive ? 'filter-pill--active' : ''}`}
-                      onClick={() => setSelectedCategory((v) => (v === cat.id ? null : cat.id))}
-                      title={`${cat.name} (${count} channels)`}
-                    >
-                      <span className="filter-pill__icon">{icon}</span>
-                      <span>{cat.name}</span>
-                      <span className="filter-pill__count">{count}</span>
-                    </button>
-                  )
-                })}
+              <div className="home-categories-scroll-wrap">
+                <div className="home-categories-scroll" ref={categoriesScrollRef}>
+                  {availableCategories.map((cat) => {
+                    const isActive = selectedCategory === cat.id
+                    const icon = CATEGORY_ICONS[cat.id.toLowerCase()] || '📺'
+                    return (
+                      <button
+                        key={cat.id}
+                        className={`filter-pill ${isActive ? 'filter-pill--active' : ''}`}
+                        onClick={() => setSelectedCategory((v) => (v === cat.id ? null : cat.id))}
+                        title={`${cat.name} (${cat.count} channels)`}
+                      >
+                        <span className="filter-pill__icon">{icon}</span>
+                        <span>{cat.name}</span>
+                        <span className="filter-pill__count">{cat.count}</span>
+                      </button>
+                    )
+                  })}
+                </div>
               </div>
             </div>
           </div>
@@ -363,10 +478,12 @@ export function Home() {
             <section className="home-search-results fade-up">
               <div className="home-search-results__title-bar">
                 <h2 className="home-search-results__title">
-                  {searched !== null
-                    ? `"${search}" — ${searched.length} channels`
+                  {search.trim()
+                    ? `"${search}" — ${activeGridChannels.length} channels`
                     : selectedCategory
                     ? `${categories.find((c) => c.id === selectedCategory)?.name ?? 'Category'} — ${activeGridChannels.length} channels`
+                    : selectedCountry
+                    ? `${formatCountryDisplay(selectedCountry)} — ${activeGridChannels.length} channels`
                     : `${activeGridChannels.length} channels`}
                 </h2>
               </div>
@@ -406,7 +523,7 @@ export function Home() {
               )}
 
               {/* Priority Category Rows */}
-              {sortedCategories.map((cat) => {
+              {availableCategories.map((cat) => {
                 const chans = channelsByCategory.get(cat.id) ?? []
                 if (chans.length === 0) return null
                 const icon = CATEGORY_ICONS[cat.id.toLowerCase()] || '📺'
@@ -421,6 +538,27 @@ export function Home() {
               })}
             </>
           )}
+
+          {/* Mobile Filter Sheet Modal */}
+          <FilterSheet
+            isOpen={isFilterSheetOpen}
+            onClose={() => setIsFilterSheetOpen(false)}
+            totalChannelsCount={activeGridChannels.length}
+            availableCountries={availableCountries}
+            selectedCountry={effectiveCountry}
+            onSelectCountry={setSelectedCountry}
+            availableCategories={availableCategories}
+            selectedCategory={effectiveCategory}
+            onSelectCategory={setSelectedCategory}
+            availableQualities={availableQualities}
+            selectedQuality={effectiveQuality}
+            onSelectQuality={setSelectedQuality}
+            showFavOnly={showFavOnly}
+            onToggleFavOnly={() => setShowFavOnly((v) => !v)}
+            favCount={favouriteChannels.length}
+            onClearAll={clearFilters}
+            hasActiveFilters={hasActiveFilter}
+          />
         </>
       )}
     </div>
