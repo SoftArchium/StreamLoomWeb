@@ -24,10 +24,17 @@ export function ChannelCard({ channel, nowPlaying, size = 'medium', onWatch, pla
     if (!hasStream) return
     onWatch?.(channel.id)
     sessionStorage.setItem('sl_last_viewed', channel.id)
+    const returnPath = location.pathname + location.search
+    sessionStorage.setItem('sl_return_to', returnPath)
+    if (playlist && playlist.length > 0) {
+      try {
+        sessionStorage.setItem('sl_active_playlist', JSON.stringify(playlist))
+      } catch {}
+    }
     navigate(`/watch/${encodeURIComponent(channel.id)}`, {
       state: {
         playlist: playlist ?? [channel.id],
-        returnTo: location.pathname + location.search,
+        returnTo: returnPath,
       },
     })
   }, [hasStream, channel.id, playlist, location.pathname, location.search, navigate, onWatch])

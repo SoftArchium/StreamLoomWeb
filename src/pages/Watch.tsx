@@ -10,11 +10,40 @@ export function Watch() {
   const navigate = useNavigate()
   const location = useLocation()
 
-  const decoded = channelId ? decodeURIComponent(channelId) : ''
-  const channel = channels.find((c) => c.id === decoded)
+  const channelIdParam = channelId ? decodeURIComponent(channelId) : ''
+  const channel = channels.find((c) => c.id === channelId || c.id === channelIdParam)
 
-  const playlistIds = (location.state as { playlist?: string[] } | null)?.playlist
-  const returnTo = (location.state as { returnTo?: string } | null)?.returnTo || '/'
+  // Retrieve playlist from route state OR fallback to sessionStorage
+  const playlistIds = useMemo(() => {
+    const fromState = (location.state as { playlist?: string[] } | null)?.playlist
+    if (fromState && Array.isArray(fromState) && fromState.length > 0) {
+      try {
+        sessionStorage.setItem('sl_active_playlist', JSON.stringify(fromState))
+      } catch {}
+      return fromState
+    }
+    try {
+      const stored = sessionStorage.getItem('sl_active_playlist')
+      if (stored) {
+        const parsed = JSON.parse(stored)
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed as string[]
+        }
+      }
+    } catch {}
+    return null
+  }, [location.state])
+
+  const returnTo = useMemo(() => {
+    const fromState = (location.state as { returnTo?: string } | null)?.returnTo
+    if (fromState) {
+      try {
+        sessionStorage.setItem('sl_return_to', fromState)
+      } catch {}
+      return fromState
+    }
+    return sessionStorage.getItem('sl_return_to') || '/'
+  }, [location.state])
 
   const channelMap = useMemo(() => new Map(channels.map((c) => [c.id, c])), [channels])
 
@@ -29,7 +58,7 @@ export function Watch() {
     return channels.filter((c) => c.stream)
   }, [playlistIds, channelMap, channels])
 
-  if (loading) {
+  if (loading && !channels.length) {
     return (
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100dvh', color: 'var(--text-muted)' }}>
         Loading…
@@ -43,7 +72,7 @@ export function Watch() {
         <p>Channel not found or no stream available.</p>
         <button
           style={{ padding: '10px 24px', background: 'var(--accent-gradient)', color: 'white', borderRadius: 'var(--radius-full)', fontWeight: 700, cursor: 'pointer', border: 'none' }}
-          onClick={() => navigate(returnTo, { state: { targetChannelId: decoded } })}
+          onClick={() => navigate(returnTo, { state: { targetChannelId: channelIdParam } })}
         >
           ← Go back
         </button>
@@ -51,5 +80,5 @@ export function Watch() {
     )
   }
 
-  return <VideoPlayer channel={channel} allChannels={orderedPlaylist} returnTo={returnTo} />
+  return <VideoPlayer key={channel.id} channel={channel} allChannels={orderedPlaylist} returnTo={returnTo} />
 }

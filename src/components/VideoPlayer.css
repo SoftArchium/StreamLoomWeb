@@ -83,12 +83,16 @@
   transform: translateY(8px);
 }
 
-.player:hover .player__hud,
-.player:focus-within .player__hud,
 .player--hud-visible .player__hud {
   opacity: 1;
   transform: translateY(0);
   pointer-events: auto;
+}
+
+/* Hide mouse cursor in fullscreen when overlay is hidden */
+.player--fullscreen:not(.player--hud-visible),
+.player:fullscreen:not(.player--hud-visible) {
+  cursor: none;
 }
 
 /* Back button */
@@ -302,9 +306,15 @@
   right: 0;
   text-align: center;
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.3);
+  color: rgba(255, 255, 255, 0.4);
   pointer-events: none;
   z-index: 10;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.player--hud-visible .player__hint {
+  opacity: 1;
 }
 
 /* Responsive Player Controls */

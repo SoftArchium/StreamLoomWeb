@@ -83,12 +83,45 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
     if (!container) return
 
     if (!document.fullscreenElement) {
-      container.requestFullscreen().then(() => setIsFullscreen(true)).catch(() => {})
+      container.requestFullscreen().then(() => {
+        setIsFullscreen(true)
+        if (hideHudTimer.current) window.clearTimeout(hideHudTimer.current)
+        hideHudTimer.current = window.setTimeout(() => {
+          setShowHud(false)
+        }, 1200)
+      }).catch(() => {})
     } else {
-      document.exitFullscreen().then(() => setIsFullscreen(false)).catch(() => {})
+      document.exitFullscreen().then(() => {
+        setIsFullscreen(false)
+        setShowHud(true)
+      }).catch(() => {})
     }
-    resetHudTimer()
-  }, [resetHudTimer])
+  }, [])
+
+  useEffect(() => {
+    function onFullscreenChange() {
+      const isFs = Boolean(document.fullscreenElement)
+      setIsFullscreen(isFs)
+      if (isFs) {
+        if (hideHudTimer.current) window.clearTimeout(hideHudTimer.current)
+        hideHudTimer.current = window.setTimeout(() => {
+          setShowHud(false)
+        }, 1200)
+      } else {
+        setShowHud(true)
+      }
+    }
+    document.addEventListener('fullscreenchange', onFullscreenChange)
+    return () => document.removeEventListener('fullscreenchange', onFullscreenChange)
+  }, [])
+
+  const handleMouseMove = useCallback(() => {
+    setShowHud(true)
+    if (hideHudTimer.current) window.clearTimeout(hideHudTimer.current)
+    hideHudTimer.current = window.setTimeout(() => {
+      setShowHud(false)
+    }, isFullscreen ? 1800 : 3500)
+  }, [isFullscreen])
 
   const togglePiP = useCallback(async () => {
     const v = videoRef.current
@@ -108,10 +141,14 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
   // Switch channel preserving the active playlist and return path
   const switchChannel = useCallback((target: EnrichedChannel) => {
     sessionStorage.setItem('sl_last_viewed', target.id)
+    const playlistIds = allChannels.map((c) => c.id)
+    try {
+      sessionStorage.setItem('sl_active_playlist', JSON.stringify(playlistIds))
+    } catch {}
     navigate(`/watch/${encodeURIComponent(target.id)}`, {
       replace: true,
       state: {
-        playlist: allChannels.map((c) => c.id),
+        playlist: playlistIds,
         returnTo,
       },
     })
@@ -240,12 +277,12 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
     function onKey(e: KeyboardEvent) {
       if ((e.target as HTMLElement).tagName === 'INPUT') return
 
-      resetHudTimer()
+      handleMouseMove()
 
-      if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') {
+      if (e.key === 'ArrowUp' || e.key === 'ArrowLeft' || e.key === '[' || e.key === 'p' || e.key === 'P') {
         e.preventDefault()
         if (prevChannel) switchChannel(prevChannel)
-      } else if (e.key === 'ArrowDown' || e.key === 'ArrowRight') {
+      } else if (e.key === 'ArrowDown' || e.key === 'ArrowRight' || e.key === ']' || e.key === 'n' || e.key === 'N') {
         e.preventDefault()
         if (nextChannel) switchChannel(nextChannel)
       } else if (e.key === 'Escape' || e.key === 'Backspace') {
@@ -267,7 +304,7 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
 
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [prevChannel, nextChannel, switchChannel, handleBack, showChannelList, togglePlayPause, toggleFullscreen, toggleMute, resetHudTimer])
+  }, [prevChannel, nextChannel, switchChannel, handleBack, showChannelList, togglePlayPause, toggleFullscreen, toggleMute, handleMouseMove])
 
   const [currentTimestamp] = useState(() => Date.now())
   const nowPlaying = useMemo(() => getCurrentProgram(programs, currentTimestamp), [programs, currentTimestamp])
@@ -279,10 +316,10 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
 
   return (
     <div
-      className={`player ${showHud ? 'player--hud-visible' : ''}`}
+      className={`player ${showHud ? 'player--hud-visible' : ''} ${isFullscreen ? 'player--fullscreen' : ''}`}
       ref={containerRef}
-      onMouseMove={resetHudTimer}
-      onTouchStart={resetHudTimer}
+      onMouseMove={handleMouseMove}
+      onTouchStart={handleMouseMove}
     >
       <video
         ref={videoRef}
