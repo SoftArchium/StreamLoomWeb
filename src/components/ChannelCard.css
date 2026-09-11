@@ -1,0 +1,106 @@
+.channel-card {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  transition:
+    transform var(--duration-base) var(--ease-spring),
+    box-shadow var(--duration-base) var(--ease-out),
+    border-color var(--duration-base) var(--ease-out);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.channel-card:hover,
+.channel-card:focus-visible {
+  transform: translateY(-4px) scale(1.02);
+  box-shadow: var(--shadow-card), var(--shadow-glow);
+  border-color: var(--border-hover);
+  outline: none;
+}
+
+.channel-card:active { transform: scale(0.98); }
+
+.channel-card--no-stream {
+  opacity: 0.5;
+  cursor: default;
+  pointer-events: none;
+}
+
+/* Sizes */
+.channel-card--small  { width: 130px; }
+.channel-card--medium { width: 170px; }
+.channel-card--large  { width: 220px; }
+
+/* Thumbnail */
+.channel-card__thumb {
+  position: relative;
+  background: var(--bg-surface);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.channel-card--small  .channel-card__thumb { height: 72px; }
+.channel-card--medium .channel-card__thumb { height: 96px; }
+.channel-card--large  .channel-card__thumb { height: 124px; }
+
+.channel-card__thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  padding: 12px;
+  transition: transform var(--duration-base) var(--ease-out);
+}
+
+.channel-card:hover .channel-card__thumb img { transform: scale(1.08); }
+
+.channel-card__initials {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text-muted);
+  letter-spacing: 1px;
+}
+
+.channel-card__play-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 28px;
+  color: white;
+  opacity: 0;
+  transition: opacity var(--duration-fast) ease;
+}
+
+.channel-card:hover .channel-card__play-overlay { opacity: 1; }
+
+/* Info */
+.channel-card__info {
+  padding: 10px 12px 12px;
+}
+
+.channel-card__name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-bottom: 4px;
+}
+
+.channel-card__epg {
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: flex;
+  align-items: center;
+}
