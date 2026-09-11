@@ -13,17 +13,19 @@
  *   catalogue:g<N>:categories                   → Category[]
  */
 
-const UPSTASH_URL =
-  (import.meta.env.VITE_UPSTASH_REDIS_REST_URL as string | undefined) ||
-  (import.meta.env.UPSTASH_REDIS_REST_URL as string | undefined) ||
-  (import.meta.env.UPSTASH_REDIS_URL as string | undefined) ||
-  'https://holy-grouper-87774.upstash.io'
+const UPSTASH_URL = (
+  import.meta.env.VITE_UPSTASH_REDIS_REST_URL ||
+  import.meta.env.VITE_UPSTASH_REDIS_URL ||
+  import.meta.env.UPSTASH_REDIS_REST_URL ||
+  import.meta.env.UPSTASH_REDIS_URL
+) as string | undefined
 
-const UPSTASH_TOKEN =
-  (import.meta.env.VITE_UPSTASH_REDIS_REST_READONLY_TOKEN as string | undefined) ||
-  (import.meta.env.UPSTASH_REDIS_READONLY_TOKEN as string | undefined) ||
-  (import.meta.env.UPSTASH_REDIS_REST_TOKEN as string | undefined) ||
-  'ggAAAAAAAVbeAAIgcDGJ9ITrkBWhJ7AloV6mQQqjCwwwtVYqOE3U_MW5i0LdDQ'
+const UPSTASH_TOKEN = (
+  import.meta.env.VITE_UPSTASH_REDIS_REST_READONLY_TOKEN ||
+  import.meta.env.VITE_UPSTASH_REDIS_READONLY_TOKEN ||
+  import.meta.env.UPSTASH_REDIS_REST_READONLY_TOKEN ||
+  import.meta.env.UPSTASH_REDIS_READONLY_TOKEN
+) as string | undefined
 
 /** True when Upstash credentials are configured. */
 export const isUpstashConfigured = Boolean(UPSTASH_URL && UPSTASH_TOKEN)
