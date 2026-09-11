@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import type { EnrichedChannel } from '../hooks/useChannels'
 import type { EpgProgram } from '../api/supabase'
@@ -10,7 +10,6 @@ interface Props {
   epgChannelIds: Set<string>
 }
 
-// HOURS_TO_SHOW and PIXELS_PER_MINUTE control the width of the timeline
 const PIXELS_PER_MINUTE = 4
 
 function formatTime(iso: string) {
@@ -29,49 +28,73 @@ function nowMinutes() {
 
 export function EpgGuide({ channels, epgChannelIds }: Props) {
   const navigate = useNavigate()
-  const guideChannels = channels.filter((ch) => epgChannelIds.has(ch.id) && ch.stream)
+  const guideChannels = useMemo(
+    () => channels.filter((ch) => epgChannelIds.has(ch.id) && ch.stream),
+    [channels, epgChannelIds]
+  )
   const [epgMap, setEpgMap] = useState<Map<string, EpgProgram[]>>(new Map())
   const [loadedCount, setLoadedCount] = useState(0)
   const timelineRef = useRef<HTMLDivElement>(null)
 
-  const VISIBLE = 30 // Load first 30 channels' EPG
-  const visibleChannels = guideChannels.slice(0, VISIBLE)
+  const VISIBLE = 30
+  const visibleChannels = useMemo(() => guideChannels.slice(0, VISIBLE), [guideChannels])
+  const channelIdsKey = useMemo(() => visibleChannels.map((c) => c.id).join(','), [visibleChannels])
 
-  const loadEpg = useCallback(async () => {
-    const batchSize = 5
-    for (let i = 0; i < visibleChannels.length; i += batchSize) {
-      const batch = visibleChannels.slice(i, i + batchSize)
-      await Promise.all(
-        batch.map(async (ch) => {
-          if (epgMap.has(ch.id)) return
-          const programs = await fetchEpg(ch.id)
-          setEpgMap((prev) => new Map(prev).set(ch.id, programs))
-        })
-      )
-      setLoadedCount((n) => Math.min(n + batchSize, visibleChannels.length))
-    }
-  }, [visibleChannels, epgMap])
-
+  // Fetch EPG for channels
   useEffect(() => {
-    if (visibleChannels.length > 0) loadEpg()
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visibleChannels.length])
+    let cancelled = false
+
+    async function load() {
+      const batchSize = 5
+      for (let i = 0; i < visibleChannels.length; i += batchSize) {
+        if (cancelled) break
+        const batch = visibleChannels.slice(i, i + batchSize)
+        const results = await Promise.all(
+          batch.map(async (ch) => {
+            try {
+              const data = await fetchEpg(ch.id)
+              return { id: ch.id, data }
+            } catch {
+              return { id: ch.id, data: [] }
+            }
+          })
+        )
+
+        if (cancelled) break
+
+        setEpgMap((prev) => {
+          const next = new Map(prev)
+          for (const item of results) {
+            next.set(item.id, item.data)
+          }
+          return next
+        })
+        setLoadedCount((n) => Math.min(n + batchSize, visibleChannels.length))
+      }
+    }
+
+    if (visibleChannels.length > 0) {
+      load()
+    }
+
+    return () => {
+      cancelled = true
+    }
+  }, [channelIdsKey, visibleChannels])
 
   // Scroll to current time
   useEffect(() => {
-    const offset = nowMinutes() * PIXELS_PER_MINUTE - 80
-    timelineRef.current?.scrollTo({ left: offset, behavior: 'smooth' })
+    const offset = nowMinutes() * PIXELS_PER_MINUTE - 120
+    timelineRef.current?.scrollTo({ left: Math.max(0, offset), behavior: 'smooth' })
   }, [])
 
-  // Build hour labels for the header (from midnight)
   const hours = Array.from({ length: 24 }, (_, h) => h)
-
-  const now = nowMinutes()
+  const [now] = useState(() => nowMinutes())
 
   return (
     <div className="epg-guide">
       <div className="epg-guide__header glass">
-        <div className="epg-guide__sidebar-spacer" />
+        <div className="epg-guide__sidebar-spacer">Channels</div>
         <div className="epg-guide__timeline-header" ref={timelineRef}>
           {hours.map((h) => (
             <div
@@ -82,7 +105,6 @@ export function EpgGuide({ channels, epgChannelIds }: Props) {
               {String(h).padStart(2, '0')}:00
             </div>
           ))}
-          {/* Current time indicator */}
           <div
             className="epg-guide__now-line"
             style={{ left: now * PIXELS_PER_MINUTE }}
@@ -93,7 +115,7 @@ export function EpgGuide({ channels, epgChannelIds }: Props) {
       <div className="epg-guide__body">
         {loadedCount < visibleChannels.length && (
           <div className="epg-guide__loading">
-            Loading guide… {loadedCount}/{visibleChannels.length}
+            Loading schedules… {loadedCount}/{visibleChannels.length}
           </div>
         )}
 
@@ -109,7 +131,7 @@ export function EpgGuide({ channels, epgChannelIds }: Props) {
                 tabIndex={0}
               >
                 {ch.logo ? (
-                  <img src={ch.logo} alt={ch.name} className="epg-guide__channel-logo" />
+                  <img src={ch.logo} alt={ch.name} className="epg-guide__channel-logo" loading="lazy" />
                 ) : (
                   <span className="epg-guide__channel-initials">
                     {ch.name.slice(0, 2).toUpperCase()}
@@ -118,7 +140,7 @@ export function EpgGuide({ channels, epgChannelIds }: Props) {
                 <span className="epg-guide__channel-name">{ch.name}</span>
               </div>
 
-              {/* Programs */}
+              {/* Programs timeline */}
               <div className="epg-guide__programs">
                 {programs.map((prog) => {
                   const startMin = minutesSinceMidnight(prog.start_time)
@@ -141,7 +163,7 @@ export function EpgGuide({ channels, epgChannelIds }: Props) {
                   )
                 })}
                 {programs.length === 0 && epgMap.has(ch.id) && (
-                  <div className="epg-guide__no-prog">No schedule data</div>
+                  <div className="epg-guide__no-prog">No schedule data available</div>
                 )}
               </div>
             </div>

@@ -6,13 +6,81 @@
   padding-top: var(--space-lg);
 }
 
+/* Toolbar: search + filter pills on same row */
 .home-toolbar {
   display: flex;
-  align-items: center;
-  gap: var(--space-lg);
+  flex-direction: column;
+  gap: var(--space-md);
   margin-bottom: var(--space-xl);
 }
 
+.home-filters {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  flex-wrap: wrap;
+}
+
+/* Filter pills */
+.filter-pill {
+  padding: 6px 14px;
+  border-radius: var(--radius-full);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  white-space: nowrap;
+  transition:
+    background var(--duration-fast) ease,
+    color var(--duration-fast) ease,
+    border-color var(--duration-fast) ease,
+    transform var(--duration-fast) var(--ease-spring);
+}
+
+.filter-pill:hover {
+  color: var(--text-primary);
+  border-color: var(--border-hover);
+  transform: translateY(-1px);
+}
+
+.filter-pill--active {
+  background: rgba(124, 110, 247, 0.15);
+  border-color: var(--accent);
+  color: var(--text-primary);
+}
+
+.filter-pill--clear {
+  color: var(--text-muted);
+  border-style: dashed;
+}
+
+.filter-pill--clear:hover {
+  color: #ef4444;
+  border-color: #ef4444;
+  background: rgba(239, 68, 68, 0.1);
+}
+
+/* Country select */
+.filter-select {
+  padding: 6px 12px;
+  border-radius: var(--radius-full);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  outline: none;
+  transition: border-color var(--duration-fast) ease;
+}
+
+.filter-select:hover { border-color: var(--border-hover); color: var(--text-primary); }
+.filter-select option { background: var(--bg-surface); }
+
+/* Search results grid */
 .home-search-results {
   margin-bottom: var(--space-2xl);
 }
@@ -26,10 +94,11 @@
 
 .home-search-results__grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
   gap: var(--space-md);
 }
 
+/* Error state */
 .home-error {
   display: flex;
   flex-direction: column;
@@ -47,4 +116,11 @@
   border-radius: var(--radius-full);
   font-weight: 700;
   font-size: 14px;
+}
+
+/* Responsive */
+@media (max-width: 600px) {
+  .home-search-results__grid {
+    grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  }
 }

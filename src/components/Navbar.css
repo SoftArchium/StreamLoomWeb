@@ -54,3 +54,34 @@
   color: var(--text-primary);
   border-bottom-color: var(--accent);
 }
+
+.navbar__actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.navbar__icon-btn {
+  width: 36px; height: 36px;
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 16px;
+  color: var(--text-secondary);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  transition: color var(--duration-fast) ease, background var(--duration-fast) ease;
+}
+.navbar__icon-btn:hover { color: var(--text-primary); background: var(--bg-card-hover); }
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.navbar__spinner {
+  width: 16px; height: 16px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  display: inline-block;
+}
+

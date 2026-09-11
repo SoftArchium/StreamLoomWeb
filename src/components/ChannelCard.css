@@ -104,3 +104,54 @@
   display: flex;
   align-items: center;
 }
+
+.channel-card__country {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-muted);
+  letter-spacing: 0.5px;
+}
+
+/* Quality badge */
+.channel-card__quality {
+  position: absolute;
+  top: 6px; left: 6px;
+  font-size: 9px;
+  font-weight: 700;
+  padding: 2px 5px;
+  border-radius: 4px;
+  background: rgba(0,0,0,0.65);
+  color: var(--accent-2);
+  border: 1px solid rgba(86, 207, 221, 0.3);
+  letter-spacing: 0.5px;
+}
+
+/* Favourite button */
+.channel-card__fav {
+  position: absolute;
+  top: 5px; right: 5px;
+  width: 26px; height: 26px;
+  border-radius: 50%;
+  background: rgba(0,0,0,0.6);
+  border: 1px solid rgba(255,255,255,0.15);
+  color: var(--text-muted);
+  font-size: 14px;
+  display: flex; align-items: center; justify-content: center;
+  opacity: 0;
+  transition:
+    opacity var(--duration-fast) ease,
+    color var(--duration-fast) ease,
+    transform var(--duration-fast) var(--ease-spring);
+}
+
+.channel-card:hover .channel-card__fav { opacity: 1; }
+
+.channel-card__fav--active {
+  opacity: 1 !important;
+  color: #ef4444;
+  border-color: rgba(239, 68, 68, 0.4);
+  background: rgba(239, 68, 68, 0.15);
+}
+
+.channel-card__fav:hover { transform: scale(1.2); }
+

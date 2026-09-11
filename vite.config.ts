@@ -9,8 +9,8 @@ export default defineConfig({
       registerType: 'autoUpdate',
       includeAssets: ['favicon.ico', 'icons/*.png'],
       manifest: {
-        name: 'StreamLook',
-        short_name: 'StreamLook',
+        name: 'StreamLoom',
+        short_name: 'StreamLoom',
         description: 'Live TV & IPTV streaming, anywhere.',
         theme_color: '#0a0a0f',
         background_color: '#0a0a0f',

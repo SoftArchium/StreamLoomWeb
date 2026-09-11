@@ -8,13 +8,14 @@ interface Props {
   title: string
   channels: EnrichedChannel[]
   nowPlayingMap?: Map<string, EpgProgram>
+  onWatch?: (channelId: string) => void
 }
 
-export function CategoryRow({ title, channels, nowPlayingMap }: Props) {
+export function CategoryRow({ title, channels, nowPlayingMap, onWatch }: Props) {
   const rowRef = useRef<HTMLDivElement>(null)
 
   function scroll(dir: 'left' | 'right') {
-    rowRef.current?.scrollBy({ left: dir === 'right' ? 520 : -520, behavior: 'smooth' })
+    rowRef.current?.scrollBy({ left: dir === 'right' ? 560 : -560, behavior: 'smooth' })
   }
 
   if (channels.length === 0) return null
@@ -34,6 +35,7 @@ export function CategoryRow({ title, channels, nowPlayingMap }: Props) {
             key={ch.id}
             channel={ch}
             nowPlaying={nowPlayingMap?.get(ch.id)}
+            onWatch={onWatch}
           />
         ))}
       </div>
