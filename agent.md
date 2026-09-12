@@ -108,3 +108,5 @@ StreamLoomWeb/
    - Always call `hls.stopLoad()`, `hls.detachMedia()`, and `hls.destroy()` in `useEffect` cleanups and before re-initializing playback.
 4. **Hardcoding Secrets or Private Keys**:
    - Do not commit `.env` or sensitive credentials. All client keys must be read-only anon credentials from environment variables (`VITE_*`).
+5. **Leaving Unpushed Commits**:
+   - Always commit and push changes directly to `main` once completed and verified.
