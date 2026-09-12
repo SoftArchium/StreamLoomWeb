@@ -172,6 +172,27 @@ export const onRequest: PagesFunction = async (context) => {
     timestamp: Date.now(),
   }
 
+  // Populate edge cache immediately with initial sync probe result
+  if (edgeCache) {
+    try {
+      const initialToCache = new Response(JSON.stringify(payload), {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/json; charset=utf-8',
+          'Cache-Control': 'public, max-age=7200',
+          'Access-Control-Allow-Origin': '*',
+        },
+      })
+      if (typeof context.waitUntil === 'function') {
+        context.waitUntil(edgeCache.put(cacheKey, initialToCache))
+      } else {
+        edgeCache.put(cacheKey, initialToCache).catch(() => {})
+      }
+    } catch {
+      // Ignore cache storage errors
+    }
+  }
+
   // Background job to probe remaining candidates and populate edge cache
   const remainingCandidates = candidateUrls.filter(
     (u) => !workingCandidates.includes(u) && !deadCandidates.includes(u)
