@@ -52,9 +52,11 @@ export function HeroSection({ channels }: Props) {
             className="hero__btn hero__btn--primary"
             onClick={() => {
               sessionStorage.setItem('sl_last_viewed', featured.id)
+              try {
+                sessionStorage.removeItem('sl_active_playlist')
+              } catch {}
               navigate(`/watch/${encodeURIComponent(featured.id)}`, {
                 state: {
-                  playlist: heroChannels.map((c) => c.id),
                   returnTo: '/',
                 },
               })

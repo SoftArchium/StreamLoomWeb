@@ -332,6 +332,29 @@
   transform: scale(1.05);
 }
 
+.player__stream-badge-btn {
+  padding: 6px 14px;
+  border-radius: var(--radius-full);
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  backdrop-filter: blur(12px);
+  transition: background 0.2s ease, transform 0.2s ease;
+  white-space: nowrap;
+}
+
+.player__stream-badge-btn:hover {
+  background: rgba(255, 255, 255, 0.24);
+  color: #fff;
+  transform: scale(1.03);
+}
+
 /* Bottom HUD Layout */
 .player__bottom-layout {
   display: flex;

@@ -71,6 +71,7 @@ export const onRequest: PagesFunction = async (context) => {
     responseHeaders.set('Access-Control-Allow-Origin', '*')
     responseHeaders.set('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS')
     responseHeaders.set('Access-Control-Allow-Headers', '*')
+    responseHeaders.set('Access-Control-Expose-Headers', '*')
     responseHeaders.delete('X-Frame-Options')
     responseHeaders.delete('Content-Security-Policy')
 
@@ -105,11 +106,28 @@ export const onRequest: PagesFunction = async (context) => {
 
       // Confirm M3U8 via magic header
       if (trimmed.startsWith('#EXTM3U')) {
-        const baseUrl = new URL(upstreamResponse.url || parsedTarget.toString())
+        let baseStr = upstreamResponse.url
+        if (!baseStr || baseStr === 'about:blank') {
+          baseStr = parsedTarget.toString()
+        }
+        const baseUrl = new URL(baseStr)
         const proxyBase = `${urlObj.origin}${urlObj.pathname}`
 
+        const buildChildUrl = (raw: string) => {
+          try {
+            const absolute = new URL(raw, baseUrl).toString()
+            const p = new URLSearchParams()
+            p.set('url', absolute)
+            if (customUa) p.set('ua', customUa)
+            if (customRef) p.set('ref', customRef)
+            return `${proxyBase}?${p.toString()}`
+          } catch {
+            return raw
+          }
+        }
+
         const rewrittenText = originalText
-          .split('\n')
+          .split(/\r?\n/)
           .map((line) => {
             const lineTrimmed = line.trim()
             if (!lineTrimmed) return line
@@ -117,27 +135,21 @@ export const onRequest: PagesFunction = async (context) => {
               // Rewrite URIs in tags like #EXT-X-KEY:...,URI="..." or #EXT-X-MAP:URI="..."
               if (lineTrimmed.includes('URI="')) {
                 return lineTrimmed.replace(/URI="([^"]+)"/g, (_, uri) => {
-                  try {
-                    const absolute = new URL(uri, baseUrl).toString()
-                    return `URI="${proxyBase}?url=${encodeURIComponent(absolute)}"`
-                  } catch {
-                    return `URI="${uri}"`
-                  }
+                  return `URI="${buildChildUrl(uri)}"`
                 })
               }
               return line
             }
             // Non-comment line in M3U8 is a playlist or segment URI
-            try {
-              const absoluteUri = new URL(lineTrimmed, baseUrl).toString()
-              return `${proxyBase}?url=${encodeURIComponent(absoluteUri)}`
-            } catch {
-              return line
-            }
+            return buildChildUrl(lineTrimmed)
           })
           .join('\n')
 
         responseHeaders.set('Content-Type', 'application/vnd.apple.mpegurl; charset=utf-8')
+        responseHeaders.delete('content-length')
+        responseHeaders.delete('Content-Length')
+        responseHeaders.delete('content-encoding')
+        responseHeaders.delete('Content-Encoding')
         return new Response(rewrittenText, {
           status: upstreamResponse.status,
           headers: responseHeaders,
@@ -145,6 +157,8 @@ export const onRequest: PagesFunction = async (context) => {
       }
 
       // If text response but not EXTM3U and not video, return as-is
+      responseHeaders.delete('content-length')
+      responseHeaders.delete('Content-Length')
       return new Response(originalText, {
         status: upstreamResponse.status,
         headers: responseHeaders,
@@ -152,6 +166,13 @@ export const onRequest: PagesFunction = async (context) => {
     }
 
     // Binary media segment (.ts, .m4s, .mp4)
+    responseHeaders.set('Accept-Ranges', 'bytes')
+    if (responseHeaders.has('content-encoding')) {
+      responseHeaders.delete('content-length')
+      responseHeaders.delete('Content-Length')
+      responseHeaders.delete('content-encoding')
+      responseHeaders.delete('Content-Encoding')
+    }
     return new Response(upstreamResponse.body, {
       status: upstreamResponse.status,
       headers: responseHeaders,

@@ -73,6 +73,59 @@ export function clearBrokenStreams() {
   }
 }
 
+// ---- Verified Working Streams Cache ----
+const WORKING_STREAMS_KEY = 'sl_working_streams_v1'
+const WORKING_TTL_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
+
+export interface WorkingStreamRecord {
+  url: string
+  useProxy: boolean
+  timestamp: number
+}
+
+function getWorkingMap(): Record<string, WorkingStreamRecord> {
+  try {
+    const raw = localStorage.getItem(WORKING_STREAMS_KEY)
+    if (!raw) return {}
+    const parsed = JSON.parse(raw) as Record<string, WorkingStreamRecord>
+    const now = Date.now()
+    const valid: Record<string, WorkingStreamRecord> = {}
+    for (const [id, rec] of Object.entries(parsed)) {
+      if (now - rec.timestamp < WORKING_TTL_MS) {
+        valid[id] = rec
+      }
+    }
+    return valid
+  } catch {
+    return {}
+  }
+}
+
+export function getCachedWorkingStream(channelId: string): { url: string; useProxy: boolean } | null {
+  const map = getWorkingMap()
+  const rec = map[channelId]
+  if (!rec) return null
+  return { url: rec.url, useProxy: rec.useProxy }
+}
+
+export function cacheWorkingStream(channelId: string, url: string, useProxy = false) {
+  try {
+    const map = getWorkingMap()
+    map[channelId] = { url, useProxy, timestamp: Date.now() }
+    localStorage.setItem(WORKING_STREAMS_KEY, JSON.stringify(map))
+  } catch {
+    // ignore quota
+  }
+}
+
+export function clearWorkingStreams() {
+  try {
+    localStorage.removeItem(WORKING_STREAMS_KEY)
+  } catch {
+    // ignore
+  }
+}
+
 /**
  * Builds the proxy URL for a given stream endpoint.
  * Protects against double-proxying.

@@ -79,6 +79,8 @@ function notify() {
   _listeners.forEach((fn) => fn())
 }
 
+import { getCachedWorkingStream } from '../util/stream'
+
 function enrichChannels(
   rawChannels: { id: string; name: string; logo: string | null; country: string | null; is_active: boolean; channel_categories: { category_id: string }[] }[],
   streams: { channel_id: string | null; url: string; quality: string | null; status: string | null }[]
@@ -96,17 +98,38 @@ function enrichChannels(
 
   return rawChannels.map((ch) => {
     const channelStreams = streamMap.get(ch.id) || []
-    // Prioritize HTTPS streams over HTTP to prevent mixed-content blocks
+    const cachedWorking = getCachedWorkingStream(ch.id)
+    const workingCandidate = cachedWorking
+      ? channelStreams.find((s) => s.url === cachedWorking.url)
+      : null
+
+    let orderedStreams = channelStreams
+    if (workingCandidate) {
+      orderedStreams = [
+        workingCandidate,
+        ...channelStreams.filter((s) => s.url !== workingCandidate.url),
+      ]
+    }
+
+    // Prioritize cached working stream, then active HTTPS, then HTTPS, then active HTTP
     const bestStream =
-      channelStreams.find((s) => s.url.startsWith('https://') && s.status === 'active') ||
-      channelStreams.find((s) => s.url.startsWith('https://')) ||
-      channelStreams.find((s) => s.url.startsWith('http://') && s.status === 'active') ||
-      channelStreams[0]
+      workingCandidate ||
+      orderedStreams.find((s) => s.url.startsWith('https://') && s.status === 'active') ||
+      orderedStreams.find((s) => s.url.startsWith('https://')) ||
+      orderedStreams.find((s) => s.url.startsWith('http://') && s.status === 'active') ||
+      orderedStreams[0]
+
+    if (bestStream && orderedStreams.length > 1) {
+      orderedStreams = [
+        bestStream,
+        ...orderedStreams.filter((s) => s.url !== bestStream.url),
+      ]
+    }
 
     return {
       ...(ch as Channel),
       stream: bestStream,
-      streams: channelStreams,
+      streams: orderedStreams,
       categoryIds: ch.channel_categories.map((c) => c.category_id),
     }
   })

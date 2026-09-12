@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useChannels } from '../hooks/useChannels'
-import { getBrokenCount, clearBrokenStreams } from '../util/stream'
+import { getBrokenCount, clearBrokenStreams, clearWorkingStreams } from '../util/stream'
 import './Settings.css'
 
 export function Settings() {
@@ -42,6 +42,7 @@ export function Settings() {
       localStorage.removeItem('sl_catalogue_v2')
       localStorage.removeItem('sl_recent_v1')
       sessionStorage.removeItem('sl_active_playlist')
+      clearWorkingStreams()
       setClearedNotice(true)
       setTimeout(() => {
         setClearedNotice(false)

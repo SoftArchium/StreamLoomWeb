@@ -27,14 +27,19 @@ export function ChannelCard({ channel, nowPlaying, size = 'medium', onWatch, pla
     sessionStorage.setItem('sl_last_viewed', channel.id)
     const returnPath = location.pathname + location.search
     sessionStorage.setItem('sl_return_to', returnPath)
-    if (playlist && playlist.length > 0) {
+    const hasMultipleInPlaylist = Boolean(playlist && playlist.length > 1)
+    if (hasMultipleInPlaylist) {
       try {
         sessionStorage.setItem('sl_active_playlist', JSON.stringify(playlist))
+      } catch {}
+    } else {
+      try {
+        sessionStorage.removeItem('sl_active_playlist')
       } catch {}
     }
     navigate(`/watch/${encodeURIComponent(channel.id)}`, {
       state: {
-        playlist: playlist ?? [channel.id],
+        playlist: hasMultipleInPlaylist ? playlist : undefined,
         returnTo: returnPath,
       },
     })

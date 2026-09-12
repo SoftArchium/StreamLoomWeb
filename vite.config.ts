@@ -60,6 +60,8 @@ function streamProxyPlugin(): Plugin {
         'Access-Control-Allow-Origin': '*',
         'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
         'Access-Control-Allow-Headers': '*',
+        'Access-Control-Expose-Headers': '*',
+        'Accept-Ranges': 'bytes',
       }
 
       upstream.headers.forEach((value, key) => {
@@ -87,47 +89,64 @@ function streamProxyPlugin(): Plugin {
       if (upstream.ok && (likelyM3U8 || contentType.includes('text/') || contentType === '')) {
         const text = await upstream.text()
         if (text.trimStart().startsWith('#EXTM3U')) {
-          const baseUrl = new URL(upstream.url || parsedTarget.toString())
+          let baseStr = upstream.url
+          if (!baseStr || baseStr === 'about:blank') {
+            baseStr = parsedTarget.toString()
+          }
+          const baseUrl = new URL(baseStr)
           const proxyBase = '/api/proxy'
 
+          const buildChildUrl = (raw: string) => {
+            try {
+              const absolute = new URL(raw, baseUrl).toString()
+              const p = new URLSearchParams()
+              p.set('url', absolute)
+              if (customUa) p.set('ua', customUa)
+              if (customRef) p.set('ref', customRef)
+              return `${proxyBase}?${p.toString()}`
+            } catch {
+              return raw
+            }
+          }
+
           const rewritten = text
-            .split('\n')
+            .split(/\r?\n/)
             .map((line) => {
               const t = line.trim()
               if (!t) return line
               if (t.startsWith('#')) {
                 if (t.includes('URI="')) {
                   return t.replace(/URI="([^"]+)"/g, (_, uri) => {
-                    try {
-                      const abs = new URL(uri, baseUrl).toString()
-                      return `URI="${proxyBase}?url=${encodeURIComponent(abs)}"`
-                    } catch {
-                      return `URI="${uri}"`
-                    }
+                    return `URI="${buildChildUrl(uri)}"`
                   })
                 }
                 return line
               }
-              try {
-                const abs = new URL(t, baseUrl).toString()
-                return `${proxyBase}?url=${encodeURIComponent(abs)}`
-              } catch {
-                return line
-              }
+              return buildChildUrl(t)
             })
             .join('\n')
 
           resHeaders['Content-Type'] = 'application/vnd.apple.mpegurl; charset=utf-8'
+          delete resHeaders['content-length']
+          delete resHeaders['Content-Length']
+          delete resHeaders['content-encoding']
+          delete resHeaders['Content-Encoding']
           res.writeHead(upstream.status, resHeaders)
           res.end(rewritten)
           return
         }
 
+        delete resHeaders['content-length']
+        delete resHeaders['Content-Length']
         res.writeHead(upstream.status, resHeaders)
         res.end(text)
         return
       }
 
+      if (upstream.headers.has('content-encoding')) {
+        delete resHeaders['content-length']
+        delete resHeaders['Content-Length']
+      }
       res.writeHead(upstream.status, resHeaders)
       if (upstream.body) {
         const reader = upstream.body.getReader()

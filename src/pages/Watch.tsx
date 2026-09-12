@@ -16,7 +16,7 @@ export function Watch() {
   // Retrieve playlist from route state OR fallback to sessionStorage
   const playlistIds = useMemo(() => {
     const fromState = (location.state as { playlist?: string[] } | null)?.playlist
-    if (fromState && Array.isArray(fromState) && fromState.length > 0) {
+    if (fromState && Array.isArray(fromState) && fromState.length > 1) {
       try {
         sessionStorage.setItem('sl_active_playlist', JSON.stringify(fromState))
       } catch {}
@@ -26,7 +26,7 @@ export function Watch() {
       const stored = sessionStorage.getItem('sl_active_playlist')
       if (stored) {
         const parsed = JSON.parse(stored)
-        if (Array.isArray(parsed) && parsed.length > 0) {
+        if (Array.isArray(parsed) && parsed.length > 1) {
           return parsed as string[]
         }
       }
@@ -49,14 +49,16 @@ export function Watch() {
 
   // Preserve the exact list and order from the screen the user came from
   const orderedPlaylist = useMemo(() => {
-    if (playlistIds && Array.isArray(playlistIds) && playlistIds.length > 0) {
+    if (playlistIds && Array.isArray(playlistIds) && playlistIds.length > 1) {
       const list = playlistIds
         .map((id) => channelMap.get(id))
         .filter((c): c is EnrichedChannel => Boolean(c?.stream))
-      if (list.length > 0) return list
+      if (list.length > 1 && channel && list.some((c) => c.id === channel.id)) {
+        return list
+      }
     }
     return channels.filter((c) => c.stream)
-  }, [playlistIds, channelMap, channels])
+  }, [playlistIds, channelMap, channels, channel])
 
   if (loading && !channels.length) {
     return (
@@ -80,5 +82,5 @@ export function Watch() {
     )
   }
 
-  return <VideoPlayer key={channel.id} channel={channel} allChannels={orderedPlaylist} returnTo={returnTo} />
+  return <VideoPlayer channel={channel} allChannels={orderedPlaylist} returnTo={returnTo} />
 }
