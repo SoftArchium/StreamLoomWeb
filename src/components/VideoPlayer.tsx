@@ -23,6 +23,13 @@ interface Props {
   returnTo?: string
 }
 
+export interface MediaTrackItem {
+  id: number
+  name: string
+  lang?: string
+  type?: string
+}
+
 function getCurrentProgram(programs: EpgProgram[], nowMs: number): EpgProgram | undefined {
   return programs.find((p) => {
     const start = new Date(p.start_time).getTime()
@@ -55,6 +62,15 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
   const hideHudTimer = useRef<number | null>(null)
   const connectionTimeoutTimer = useRef<number | null>(null)
   const failoverTimer = useRef<number | null>(null)
+
+  const [subtitleTracks, setSubtitleTracks] = useState<MediaTrackItem[]>([])
+  const [activeSubtitleTrack, setActiveSubtitleTrack] = useState<number>(-1)
+  const [audioTracks, setAudioTracks] = useState<MediaTrackItem[]>([])
+  const [activeAudioTrack, setActiveAudioTrack] = useState<number>(-1)
+  const [showSubtitleMenu, setShowSubtitleMenu] = useState(false)
+  const [showAudioMenu, setShowAudioMenu] = useState(false)
+  const subtitleMenuRef = useRef<HTMLDivElement>(null)
+  const audioMenuRef = useRef<HTMLDivElement>(null)
 
   const isHudVisible = showHud || isBuffering
 
@@ -114,6 +130,12 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
     setIsBuffering(true)
     setIsSlowConnecting(false)
     setShowHud(true)
+    setSubtitleTracks([])
+    setActiveSubtitleTrack(-1)
+    setAudioTracks([])
+    setActiveAudioTrack(-1)
+    setShowSubtitleMenu(false)
+    setShowAudioMenu(false)
   }
 
   const activeStreamIdxRef = useRef(activeStreamIdx)
@@ -246,6 +268,127 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
       setAutoSkipCountdown(null)
     }
   }, [])
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (
+        subtitleMenuRef.current &&
+        !subtitleMenuRef.current.contains(e.target as Node)
+      ) {
+        setShowSubtitleMenu(false)
+      }
+      if (
+        audioMenuRef.current &&
+        !audioMenuRef.current.contains(e.target as Node)
+      ) {
+        setShowAudioMenu(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
+
+  const selectSubtitleTrack = useCallback((trackId: number) => {
+    const hls = hlsRef.current
+    const video = videoRef.current
+
+    if (hls && hls.subtitleTracks && hls.subtitleTracks.length > 0) {
+      if (trackId < 0) {
+        hls.subtitleTrack = -1
+        hls.subtitleDisplay = false
+        setActiveSubtitleTrack(-1)
+        localStorage.setItem('sl_subtitles_enabled', 'false')
+        showToast('Subtitles: Off')
+      } else {
+        hls.subtitleTrack = trackId
+        hls.subtitleDisplay = true
+        setActiveSubtitleTrack(trackId)
+        localStorage.setItem('sl_subtitles_enabled', 'true')
+        const track = hls.subtitleTracks[trackId]
+        if (track) {
+          const lang = track.lang || track.name
+          if (lang) localStorage.setItem('sl_subtitles_lang', lang)
+          showToast(`Subtitles: ${track.name || track.lang || `Track ${trackId + 1}`}`)
+        }
+      }
+    } else if (video && video.textTracks && video.textTracks.length > 0) {
+      const tracks = Array.from(video.textTracks)
+      if (trackId < 0) {
+        tracks.forEach((t) => {
+          t.mode = 'disabled'
+        })
+        setActiveSubtitleTrack(-1)
+        localStorage.setItem('sl_subtitles_enabled', 'false')
+        showToast('Subtitles: Off')
+      } else {
+        tracks.forEach((t, i) => {
+          t.mode = i === trackId ? 'showing' : 'disabled'
+        })
+        setActiveSubtitleTrack(trackId)
+        localStorage.setItem('sl_subtitles_enabled', 'true')
+        const target = tracks[trackId]
+        if (target) {
+          const lang = target.language || target.label
+          if (lang) localStorage.setItem('sl_subtitles_lang', lang)
+          showToast(`Subtitles: ${target.label || target.language || `Track ${trackId + 1}`}`)
+        }
+      }
+    }
+  }, [showToast])
+
+  const selectAudioTrack = useCallback((trackId: number) => {
+    const hls = hlsRef.current
+    if (hls && hls.audioTracks && hls.audioTracks.length > 0) {
+      if (trackId >= 0 && trackId < hls.audioTracks.length) {
+        hls.audioTrack = trackId
+        setActiveAudioTrack(trackId)
+        const track = hls.audioTracks[trackId]
+        if (track) {
+          const lang = track.lang || track.name
+          if (lang) localStorage.setItem('sl_audio_lang', lang)
+          showToast(`Audio: ${track.name || track.lang || `Track ${trackId + 1}`}`)
+        }
+      }
+    }
+  }, [showToast])
+
+  const toggleSubtitles = useCallback(() => {
+    if (subtitleTracks.length === 0) {
+      showToast('No subtitles available for this stream')
+      return
+    }
+    if (activeSubtitleTrack === -1) {
+      const prefLang = localStorage.getItem('sl_subtitles_lang')
+      let targetIdx = 0
+      if (prefLang) {
+        const found = subtitleTracks.findIndex(
+          (t) =>
+            (t.lang && t.lang.toLowerCase() === prefLang.toLowerCase()) ||
+            (t.name && t.name.toLowerCase().includes(prefLang.toLowerCase()))
+        )
+        if (found >= 0) targetIdx = found
+      }
+      selectSubtitleTrack(targetIdx)
+    } else if (subtitleTracks.length === 1) {
+      selectSubtitleTrack(-1)
+    } else {
+      const nextIdx = activeSubtitleTrack + 1
+      if (nextIdx >= subtitleTracks.length) {
+        selectSubtitleTrack(-1)
+      } else {
+        selectSubtitleTrack(nextIdx)
+      }
+    }
+  }, [subtitleTracks, activeSubtitleTrack, selectSubtitleTrack, showToast])
+
+  const cycleAudioTracks = useCallback(() => {
+    if (audioTracks.length <= 1) {
+      showToast(audioTracks.length === 1 ? `Audio: ${audioTracks[0]?.name || 'Standard'}` : 'Default audio track')
+      return
+    }
+    const nextIdx = (activeAudioTrack + 1) % audioTracks.length
+    selectAudioTrack(nextIdx)
+  }, [audioTracks, activeAudioTrack, selectAudioTrack, showToast])
 
   // Switch channel preserving the active playlist and return path
   const switchChannel = useCallback((target: EnrichedChannel) => {
@@ -545,6 +688,39 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
       hlsRef.current = null
     }
 
+    const syncNativeTextTracks = () => {
+      if (isDisposed || !video.textTracks) return
+      const raw = Array.from(video.textTracks)
+      if (raw.length === 0) return
+      const tracks: MediaTrackItem[] = raw.map((t, idx) => ({
+        id: idx,
+        name: t.label || t.language || `Track ${idx + 1}`,
+        lang: t.language,
+        type: t.kind,
+      }))
+      setSubtitleTracks(tracks)
+
+      const subEnabled = localStorage.getItem('sl_subtitles_enabled') === 'true'
+      const prefLang = localStorage.getItem('sl_subtitles_lang')
+      let activeIdx = -1
+
+      raw.forEach((t, i) => {
+        if (
+          subEnabled &&
+          ((prefLang &&
+            (t.language?.toLowerCase() === prefLang.toLowerCase() ||
+              t.label.toLowerCase().includes(prefLang.toLowerCase()))) ||
+            (!prefLang && i === 0))
+        ) {
+          t.mode = 'showing'
+          activeIdx = i
+        } else {
+          t.mode = 'disabled'
+        }
+      })
+      setActiveSubtitleTrack(activeIdx)
+    }
+
     if (Hls.isSupported()) {
       const isLowLatency = localStorage.getItem('sl_low_latency') !== 'false'
       const hls = new Hls({
@@ -570,6 +746,8 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
         fragLoadingTimeOut: 12000,
         fragLoadingMaxRetry: 2,
         fragLoadingRetryDelay: 500,
+        renderTextTracksNatively: true,
+        enableCEA708Captions: true,
         xhrSetup: (xhr: XMLHttpRequest) => {
           xhr.addEventListener('readystatechange', () => {
             // Guard against HTML payloads (e.g. SPA index.html returned by unconfigured proxy)
@@ -591,11 +769,94 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
         },
       })
 
+      const onSubtitleTracksUpdated = () => {
+        if (isDisposed) return
+        const h = hlsRef.current
+        if (!h) return
+        const rawTracks = h.subtitleTracks || []
+        const tracks: MediaTrackItem[] = rawTracks.map((t, idx) => ({
+          id: idx,
+          name: t.name || t.lang || `Track ${idx + 1}`,
+          lang: t.lang,
+          type: t.type,
+        }))
+        setSubtitleTracks(tracks)
+
+        const subEnabled = localStorage.getItem('sl_subtitles_enabled') === 'true'
+        const prefLang = localStorage.getItem('sl_subtitles_lang')
+
+        if (tracks.length > 0 && subEnabled) {
+          let matchIdx = 0
+          if (prefLang) {
+            const found = tracks.findIndex(
+              (t) =>
+                (t.lang && t.lang.toLowerCase() === prefLang.toLowerCase()) ||
+                (t.name && t.name.toLowerCase().includes(prefLang.toLowerCase()))
+            )
+            if (found >= 0) matchIdx = found
+          }
+          h.subtitleTrack = matchIdx
+          h.subtitleDisplay = true
+          setActiveSubtitleTrack(matchIdx)
+        } else if (!subEnabled || tracks.length === 0) {
+          h.subtitleTrack = -1
+          h.subtitleDisplay = false
+          setActiveSubtitleTrack(-1)
+        } else {
+          setActiveSubtitleTrack(h.subtitleTrack)
+        }
+      }
+
+      const onAudioTracksUpdated = () => {
+        if (isDisposed) return
+        const h = hlsRef.current
+        if (!h) return
+        const rawTracks = h.audioTracks || []
+        const tracks: MediaTrackItem[] = rawTracks.map((t, idx) => ({
+          id: idx,
+          name: t.name || t.lang || `Audio ${idx + 1}`,
+          lang: t.lang,
+        }))
+        setAudioTracks(tracks)
+
+        const prefLang = localStorage.getItem('sl_audio_lang')
+        if (tracks.length > 1 && prefLang) {
+          const found = tracks.findIndex(
+            (t) =>
+              (t.lang && t.lang.toLowerCase() === prefLang.toLowerCase()) ||
+              (t.name && t.name.toLowerCase().includes(prefLang.toLowerCase()))
+          )
+          if (found >= 0 && h.audioTrack !== found) {
+            h.audioTrack = found
+            setActiveAudioTrack(found)
+          } else {
+            setActiveAudioTrack(h.audioTrack)
+          }
+        } else {
+          setActiveAudioTrack(h.audioTrack)
+        }
+      }
+
       hls.loadSource(targetUrl)
       hls.attachMedia(video)
 
+      hls.on(Hls.Events.SUBTITLE_TRACKS_UPDATED, onSubtitleTracksUpdated)
+      hls.on(Hls.Events.SUBTITLE_TRACK_SWITCH, (_, data) => {
+        if (!isDisposed) {
+          setActiveSubtitleTrack(data.id)
+        }
+      })
+      hls.on(Hls.Events.AUDIO_TRACKS_UPDATED, onAudioTracksUpdated)
+      hls.on(Hls.Events.AUDIO_TRACK_SWITCHED, (_, data) => {
+        if (!isDisposed) {
+          setActiveAudioTrack(data.id)
+        }
+      })
+
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
         onPlaybackSuccess()
+        onSubtitleTracksUpdated()
+        onAudioTracksUpdated()
         video.play().catch(() => {
           setIsPlaying(false)
         })
@@ -629,8 +890,11 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
       video.src = targetUrl
       video.onloadedmetadata = () => {
         onPlaybackSuccess()
+        syncNativeTextTracks()
         video.play().catch(() => setIsPlaying(false))
       }
+      video.textTracks?.addEventListener?.('addtrack', syncNativeTextTracks)
+      video.textTracks?.addEventListener?.('change', syncNativeTextTracks)
       video.onerror = () => {
         if (!isDisposed) {
           if (failoverTimer.current) {
@@ -661,6 +925,8 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
         hlsRef.current.destroy()
         hlsRef.current = null
       }
+      video.textTracks?.removeEventListener?.('addtrack', syncNativeTextTracks)
+      video.textTracks?.removeEventListener?.('change', syncNativeTextTracks)
       video.onloadedmetadata = null
       video.onerror = null
     }
@@ -674,6 +940,15 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
     if (targetTag === 'INPUT' || targetTag === 'TEXTAREA' || targetTag === 'SELECT') return
 
     handleMouseMove()
+
+    if (showSubtitleMenu || showAudioMenu) {
+      if (e.key === 'Escape' || e.key === 'Backspace') {
+        e.preventDefault()
+        setShowSubtitleMenu(false)
+        setShowAudioMenu(false)
+        return
+      }
+    }
 
     if (showChannelList) {
       if (e.key === 'Escape' || e.key === 'Backspace') {
@@ -723,8 +998,27 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
     } else if (e.key === 'm' || e.key === 'M') {
       e.preventDefault()
       toggleMute()
+    } else if (e.key === 'c' || e.key === 'C' || e.key === 's' || e.key === 'S') {
+      e.preventDefault()
+      toggleSubtitles()
+    } else if (e.key === 'a' || e.key === 'A') {
+      e.preventDefault()
+      cycleAudioTracks()
     }
-  }, [showChannelList, handleMouseMove, goToPrevChannel, goToNextChannel, handleBack, togglePlayPause, toggleFullscreen, toggleMute])
+  }, [
+    showChannelList,
+    showSubtitleMenu,
+    showAudioMenu,
+    handleMouseMove,
+    goToPrevChannel,
+    goToNextChannel,
+    handleBack,
+    togglePlayPause,
+    toggleFullscreen,
+    toggleMute,
+    toggleSubtitles,
+    cycleAudioTracks,
+  ])
 
   useEffect(() => {
     onKeyRef.current = onKey
@@ -990,6 +1284,123 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
             </div>
 
             <div className="player__playback-right">
+              {/* Audio Tracks Popover */}
+              <div className="player__menu-wrapper" ref={audioMenuRef}>
+                <button
+                  className={`player__action-btn ${showAudioMenu ? 'player__action-btn--open' : ''} ${audioTracks.length > 1 ? 'player__action-btn--available' : ''}`}
+                  onClick={() => {
+                    resetHudTimer()
+                    if (audioTracks.length <= 1) {
+                      showToast(audioTracks.length === 1 ? `Audio: ${audioTracks[0]?.name || 'Standard'}` : 'Default audio track')
+                      return
+                    }
+                    setShowAudioMenu((v) => !v)
+                    setShowSubtitleMenu(false)
+                  }}
+                  title={audioTracks.length > 1 ? `Audio Streams (${audioTracks.length}) [A]` : 'Audio (Standard)'}
+                  aria-label="Audio stream tracks"
+                  aria-expanded={showAudioMenu}
+                >
+                  <span className="player__btn-icon">🎧</span>
+                  {audioTracks.length > 1 && (
+                    <span className="player__track-count-badge">{audioTracks.length}</span>
+                  )}
+                </button>
+
+                {showAudioMenu && audioTracks.length > 0 && (
+                  <div className="player__track-popover glass" role="menu">
+                    <div className="player__track-popover-title">
+                      <span>Audio Streams</span>
+                      <span className="player__track-popover-count">{audioTracks.length} tracks</span>
+                    </div>
+                    <div className="player__track-list">
+                      {audioTracks.map((track) => (
+                        <button
+                          key={track.id}
+                          className={`player__track-item ${track.id === activeAudioTrack ? 'player__track-item--active' : ''}`}
+                          onClick={() => {
+                            selectAudioTrack(track.id)
+                            setShowAudioMenu(false)
+                            resetHudTimer()
+                          }}
+                          role="menuitem"
+                        >
+                          <span className="player__track-check">{track.id === activeAudioTrack ? '✓' : ''}</span>
+                          <span className="player__track-name">{track.name}</span>
+                          {track.lang && <span className="player__track-badge">{track.lang.toUpperCase()}</span>}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Subtitles Popover */}
+              <div className="player__menu-wrapper" ref={subtitleMenuRef}>
+                <button
+                  className={`player__action-btn ${activeSubtitleTrack >= 0 ? 'player__action-btn--active' : ''} ${showSubtitleMenu ? 'player__action-btn--open' : ''} ${subtitleTracks.length === 0 ? 'player__action-btn--disabled' : ''}`}
+                  onClick={() => {
+                    resetHudTimer()
+                    if (subtitleTracks.length === 0) {
+                      showToast('No subtitles available for this stream')
+                      return
+                    }
+                    setShowSubtitleMenu((v) => !v)
+                    setShowAudioMenu(false)
+                  }}
+                  title={subtitleTracks.length > 0 ? `Subtitles [C] (${subtitleTracks.length} available)` : 'No subtitles available'}
+                  aria-label="Subtitles & Closed Captions"
+                  aria-expanded={showSubtitleMenu}
+                >
+                  <span className="player__cc-text">CC</span>
+                  {subtitleTracks.length > 0 && (
+                    <span className="player__track-count-badge">{subtitleTracks.length}</span>
+                  )}
+                </button>
+
+                {showSubtitleMenu && subtitleTracks.length > 0 && (
+                  <div className="player__track-popover glass" role="menu">
+                    <div className="player__track-popover-title">
+                      <span>Subtitles & Captions</span>
+                      <span className="player__track-popover-count">{subtitleTracks.length} tracks</span>
+                    </div>
+                    <div className="player__track-list">
+                      <button
+                        className={`player__track-item ${activeSubtitleTrack === -1 ? 'player__track-item--active' : ''}`}
+                        onClick={() => {
+                          selectSubtitleTrack(-1)
+                          setShowSubtitleMenu(false)
+                          resetHudTimer()
+                        }}
+                        role="menuitem"
+                      >
+                        <span className="player__track-check">{activeSubtitleTrack === -1 ? '✓' : ''}</span>
+                        <span className="player__track-name">Off</span>
+                      </button>
+                      {subtitleTracks.map((track) => (
+                        <button
+                          key={track.id}
+                          className={`player__track-item ${track.id === activeSubtitleTrack ? 'player__track-item--active' : ''}`}
+                          onClick={() => {
+                            selectSubtitleTrack(track.id)
+                            setShowSubtitleMenu(false)
+                            resetHudTimer()
+                          }}
+                          role="menuitem"
+                        >
+                          <span className="player__track-check">{track.id === activeSubtitleTrack ? '✓' : ''}</span>
+                          <span className="player__track-name">{track.name}</span>
+                          {track.lang && <span className="player__track-badge">{track.lang.toUpperCase()}</span>}
+                          {track.type && track.type !== 'SUBTITLES' && (
+                            <span className="player__track-type-badge">{track.type}</span>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
               <button
                 className="player__action-btn"
                 onClick={togglePiP}
@@ -1044,7 +1455,7 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
 
       {/* Controls hint */}
       <p className="player__hint">
-        ← / → switch channel · Space play/pause · M mute · F fullscreen · Esc return
+        ← / → switch channel · Space play/pause · M mute · C subtitles · A audio · F fullscreen · Esc return
       </p>
     </div>
   )
