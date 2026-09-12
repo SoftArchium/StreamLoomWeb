@@ -120,3 +120,4 @@ Before completing any task touching the codebase:
 - [ ] Check keyboard & TV remote navigation: Arrow keys, `[`, `]`, `p`, `n`, Enter, Space, Esc.
 - [ ] Ensure no unbounded state serialization (do not serialize `allChannels` when `allChannels.length > 500`).
 - [ ] Ensure `Hls` instances and timers are detached and destroyed during component unmount.
+- [ ] Always commit and push changes to `main` once completed and tested.

@@ -104,3 +104,4 @@ StreamLoomWeb/
 - **React 19**: Avoid synchronous `setState` calls directly at the root of `useEffect` (use microtasks or action-driven updates to satisfy `oxlint`).
 - **Memory & Lifecycle**: Clean up `Hls` instances (`stopLoad()`, `detachMedia()`, `destroy()`) and all window timers in `useEffect` cleanups.
 - **CSS**: Pure CSS with CSS variables (`src/styles/`). Use glassmorphism and modern responsive layout primitives.
+- **Git Workflow**: Always commit and push changes to `main` once completed and verified.
