@@ -5,7 +5,7 @@ import type { EnrichedChannel } from '../hooks/useChannels'
 import type { EpgProgram } from '../api/supabase'
 import { useEpg, useFavourites, useRecent } from '../hooks/useChannels'
 import { formatCountryDisplay } from '../util/country'
-import { getProxyStreamUrl, isMixedContent, markStreamBroken, unmarkStreamBroken } from '../util/stream'
+import { getProxyStreamUrl, isMixedContent, markStreamBroken, unmarkStreamBroken, tryUpgradeToHttps } from '../util/stream'
 import './VideoPlayer.css'
 
 interface Props {
@@ -53,7 +53,23 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
     }
   }, [isBuffering, isFullscreen])
 
-  const streamUrl = channel.stream?.url
+  const channelStreams = useMemo(() => {
+    if (channel.streams && channel.streams.length > 0) {
+      return channel.streams
+    }
+    return channel.stream ? [channel.stream] : []
+  }, [channel])
+
+  const [prevChannelId, setPrevChannelId] = useState(channel.id)
+  const [activeStreamIdx, setActiveStreamIdx] = useState(0)
+
+  if (channel.id !== prevChannelId) {
+    setPrevChannelId(channel.id)
+    setActiveStreamIdx(0)
+  }
+
+  const currentStream = channelStreams[activeStreamIdx] || channel.stream
+  const streamUrl = currentStream?.url
 
   const togglePlayPause = useCallback(() => {
     const v = videoRef.current
@@ -201,8 +217,10 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
   const [isSlowConnecting, setIsSlowConnecting] = useState(false)
   const [toastMessage, setToastMessage] = useState<string | null>(null)
   const toastTimer = useRef<number | null>(null)
-  const autoSkipTimer = useRef<number | null>(null)
   const isProxiedRef = useRef(false)
+  const [isProxied, setIsProxied] = useState(false)
+  const [autoSkipCountdown, setAutoSkipCountdown] = useState<number | null>(null)
+  const countdownTimerRef = useRef<number | null>(null)
 
   const showToast = useCallback((msg: string, duration = 2500) => {
     setToastMessage(msg)
@@ -212,8 +230,50 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
     }, duration)
   }, [])
 
-  const autoSkipEnabled = localStorage.getItem('sl_auto_skip') !== 'false'
+  const cancelCountdown = useCallback(() => {
+    if (countdownTimerRef.current) {
+      window.clearInterval(countdownTimerRef.current)
+      countdownTimerRef.current = null
+    }
+    setAutoSkipCountdown(null)
+  }, [])
+
+  const switchChannelCleanly = useCallback((target: EnrichedChannel) => {
+    cancelCountdown()
+    switchChannel(target)
+  }, [cancelCountdown, switchChannel])
+
+  const triggerAutoSkipCountdown = useCallback(() => {
+    const autoSkip = localStorage.getItem('sl_auto_skip') === 'true'
+    if (!autoSkip || !nextChannel || nextChannel.id === channel.id) return
+
+    let remaining = 5
+    setAutoSkipCountdown(remaining)
+    if (countdownTimerRef.current) window.clearInterval(countdownTimerRef.current)
+
+    countdownTimerRef.current = window.setInterval(() => {
+      remaining -= 1
+      if (remaining <= 0) {
+        if (countdownTimerRef.current) window.clearInterval(countdownTimerRef.current)
+        countdownTimerRef.current = null
+        setAutoSkipCountdown(null)
+        markStreamBroken(channel.id)
+        switchChannel(nextChannel)
+      } else {
+        setAutoSkipCountdown(remaining)
+      }
+    }, 1000)
+  }, [channel.id, nextChannel, switchChannel])
+
   const loadStreamRef = useRef<((url: string, useProxy?: boolean) => void) | null>(null)
+
+  const handleNextStreamCandidate = useCallback(() => {
+    if (channelStreams.length <= 1) return
+    const nextIdx = (activeStreamIdx + 1) % channelStreams.length
+    setActiveStreamIdx(nextIdx)
+    showToast(`Switching to stream candidate ${nextIdx + 1} of ${channelStreams.length}…`)
+    loadStreamRef.current?.(channelStreams[nextIdx].url, false)
+  }, [channelStreams, activeStreamIdx, showToast])
 
   const loadStream = useCallback((url: string, useProxy = false) => {
     const video = videoRef.current
@@ -222,30 +282,16 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
     setIsBuffering(true)
     setIsSlowConnecting(false)
     setHasError(false)
+    cancelCountdown()
     isProxiedRef.current = useProxy
+    setIsProxied(useProxy)
 
     if (connectionTimeoutTimer.current) window.clearTimeout(connectionTimeoutTimer.current)
-    if (autoSkipTimer.current) window.clearTimeout(autoSkipTimer.current)
 
-    // Slow connection indicator after 4s
+    // Slow connection indicator after 5s without interrupting buffering
     connectionTimeoutTimer.current = window.setTimeout(() => {
       setIsSlowConnecting(true)
-    }, 4000)
-
-    // Auto-skip trigger if buffering exceeds 6s without data
-    if (autoSkipEnabled && nextChannel && nextChannel.id !== channel.id) {
-      autoSkipTimer.current = window.setTimeout(() => {
-        if (!useProxy && !url.startsWith('/api/proxy')) {
-          // Attempt proxy first before giving up
-          showToast(`Stream slow, trying edge proxy…`)
-          loadStreamRef.current?.(getProxyStreamUrl(url), true)
-        } else {
-          markStreamBroken(channel.id)
-          showToast(`Skipping unresponsive channel: ${channel.name}…`)
-          switchChannel(nextChannel)
-        }
-      }, 7000)
-    }
+    }, 5000)
 
     if (hlsRef.current) {
       hlsRef.current.stopLoad()
@@ -254,11 +300,15 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
       hlsRef.current = null
     }
 
-    // Determine target playback URL
-    // If mixed content (http on https), automatically route through proxy immediately
-    const targetUrl = isMixedContent(url) || useProxy
-      ? getProxyStreamUrl(url)
-      : url
+    // Determine target playback URL:
+    // If proxy requested: route via /api/proxy
+    // If mixed content (http on https): try HTTPS upgrade first before falling back to proxy
+    let targetUrl = url
+    if (useProxy) {
+      targetUrl = getProxyStreamUrl(url)
+    } else if (isMixedContent(url)) {
+      targetUrl = tryUpgradeToHttps(url)
+    }
 
     if (Hls.isSupported()) {
       const isLowLatency = localStorage.getItem('sl_low_latency') !== 'false'
@@ -266,9 +316,9 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
         enableWorker: true,
         lowLatencyMode: isLowLatency,
         backBufferLength: 15,
-        maxBufferLength: 15,
+        maxBufferLength: 20,
         maxMaxBufferLength: 30,
-        maxBufferSize: 15 * 1024 * 1024,
+        maxBufferSize: 20 * 1024 * 1024,
         maxBufferHole: 0.5,
         highBufferWatchdogPeriod: 2,
         nudgeOffset: 0.1,
@@ -278,13 +328,24 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
         startFragPrefetch: true,
         startLevel: -1,
         abrEwmaDefaultEstimate: 5_000_000,
-        manifestLoadingTimeOut: 4500,
-        manifestLoadingMaxRetry: 1,
-        manifestLoadingRetryDelay: 300,
-        levelLoadingTimeOut: 4500,
-        fragLoadingTimeOut: 5000,
-        fragLoadingMaxRetry: 1,
-        fragLoadingRetryDelay: 300,
+        manifestLoadingTimeOut: 12000,
+        manifestLoadingMaxRetry: 3,
+        manifestLoadingRetryDelay: 500,
+        levelLoadingTimeOut: 12000,
+        fragLoadingTimeOut: 15000,
+        fragLoadingMaxRetry: 3,
+        fragLoadingRetryDelay: 500,
+        xhrSetup: (xhr: XMLHttpRequest) => {
+          xhr.addEventListener('readystatechange', () => {
+            // Guard against HTML payloads (e.g. SPA index.html returned by unconfigured proxy)
+            if (xhr.readyState === 4 && xhr.status === 200) {
+              const ct = (xhr.getResponseHeader('Content-Type') || '').toLowerCase()
+              if (ct.includes('text/html')) {
+                xhr.abort()
+              }
+            }
+          })
+        },
       })
 
       hls.loadSource(targetUrl)
@@ -295,7 +356,6 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
         setIsSlowConnecting(false)
         unmarkStreamBroken(channel.id)
         if (connectionTimeoutTimer.current) window.clearTimeout(connectionTimeoutTimer.current)
-        if (autoSkipTimer.current) window.clearTimeout(autoSkipTimer.current)
         video.play().catch(() => {
           setIsPlaying(false)
         })
@@ -306,47 +366,46 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
         setIsSlowConnecting(false)
         unmarkStreamBroken(channel.id)
         if (connectionTimeoutTimer.current) window.clearTimeout(connectionTimeoutTimer.current)
-        if (autoSkipTimer.current) window.clearTimeout(autoSkipTimer.current)
       })
 
       hls.on(Hls.Events.ERROR, (_, data) => {
         if (data.fatal) {
           switch (data.type) {
             case Hls.ErrorTypes.NETWORK_ERROR:
-              // If network error occurred on direct URL, retry through edge proxy
+              // If direct/upgraded failed and proxy not tried yet, failover to edge proxy
               if (!isProxiedRef.current && !url.startsWith('/api/proxy')) {
-                showToast(`CORS/Network block detected, routing via edge proxy…`)
+                showToast('Direct stream blocked, retrying via edge proxy…')
                 loadStreamRef.current?.(url, true)
+              } else if (channelStreams.length > 1 && activeStreamIdx < channelStreams.length - 1) {
+                const nextIdx = activeStreamIdx + 1
+                setActiveStreamIdx(nextIdx)
+                showToast(`Trying alternate stream candidate (${nextIdx + 1}/${channelStreams.length})…`)
+                loadStreamRef.current?.(channelStreams[nextIdx].url, false)
               } else {
-                markStreamBroken(channel.id)
-                if (autoSkipEnabled && nextChannel && nextChannel.id !== channel.id) {
-                  showToast(`Stream unavailable, auto-advancing…`)
-                  window.setTimeout(() => switchChannel(nextChannel), 800)
-                } else {
-                  setHasError(true)
-                  setIsBuffering(false)
-                  setIsSlowConnecting(false)
-                  if (connectionTimeoutTimer.current) window.clearTimeout(connectionTimeoutTimer.current)
-                  if (autoSkipTimer.current) window.clearTimeout(autoSkipTimer.current)
-                  hls.destroy()
-                }
+                setHasError(true)
+                setIsBuffering(false)
+                setIsSlowConnecting(false)
+                if (connectionTimeoutTimer.current) window.clearTimeout(connectionTimeoutTimer.current)
+                hls.destroy()
+                triggerAutoSkipCountdown()
               }
               break
             case Hls.ErrorTypes.MEDIA_ERROR:
               hls.recoverMediaError()
               break
             default:
-              markStreamBroken(channel.id)
-              if (autoSkipEnabled && nextChannel && nextChannel.id !== channel.id) {
-                showToast(`Playback error, auto-advancing…`)
-                window.setTimeout(() => switchChannel(nextChannel), 800)
+              if (channelStreams.length > 1 && activeStreamIdx < channelStreams.length - 1) {
+                const nextIdx = activeStreamIdx + 1
+                setActiveStreamIdx(nextIdx)
+                showToast(`Playback error, trying alternate stream (${nextIdx + 1}/${channelStreams.length})…`)
+                loadStreamRef.current?.(channelStreams[nextIdx].url, false)
               } else {
                 setHasError(true)
                 setIsBuffering(false)
                 setIsSlowConnecting(false)
                 if (connectionTimeoutTimer.current) window.clearTimeout(connectionTimeoutTimer.current)
-                if (autoSkipTimer.current) window.clearTimeout(autoSkipTimer.current)
                 hls.destroy()
+                triggerAutoSkipCountdown()
               }
               break
           }
@@ -361,28 +420,25 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
         setIsSlowConnecting(false)
         unmarkStreamBroken(channel.id)
         if (connectionTimeoutTimer.current) window.clearTimeout(connectionTimeoutTimer.current)
-        if (autoSkipTimer.current) window.clearTimeout(autoSkipTimer.current)
         video.play().catch(() => setIsPlaying(false))
       })
       video.addEventListener('error', () => {
         if (!isProxiedRef.current && !url.startsWith('/api/proxy')) {
           loadStreamRef.current?.(url, true)
+        } else if (channelStreams.length > 1 && activeStreamIdx < channelStreams.length - 1) {
+          const nextIdx = activeStreamIdx + 1
+          setActiveStreamIdx(nextIdx)
+          loadStreamRef.current?.(channelStreams[nextIdx].url, false)
         } else {
-          markStreamBroken(channel.id)
-          if (autoSkipEnabled && nextChannel && nextChannel.id !== channel.id) {
-            showToast(`Unable to play stream, skipping…`)
-            window.setTimeout(() => switchChannel(nextChannel), 800)
-          } else {
-            setHasError(true)
-            setIsBuffering(false)
-            setIsSlowConnecting(false)
-            if (connectionTimeoutTimer.current) window.clearTimeout(connectionTimeoutTimer.current)
-            if (autoSkipTimer.current) window.clearTimeout(autoSkipTimer.current)
-          }
+          setHasError(true)
+          setIsBuffering(false)
+          setIsSlowConnecting(false)
+          if (connectionTimeoutTimer.current) window.clearTimeout(connectionTimeoutTimer.current)
+          triggerAutoSkipCountdown()
         }
       })
     }
-  }, [channel.id, channel.name, autoSkipEnabled, nextChannel, switchChannel, showToast])
+  }, [channel.id, channelStreams, activeStreamIdx, showToast, cancelCountdown, triggerAutoSkipCountdown])
 
   useEffect(() => {
     loadStreamRef.current = loadStream
@@ -396,8 +452,8 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
       sessionStorage.setItem('sl_last_viewed', channel.id)
     }
     return () => {
+      cancelCountdown()
       if (connectionTimeoutTimer.current) window.clearTimeout(connectionTimeoutTimer.current)
-      if (autoSkipTimer.current) window.clearTimeout(autoSkipTimer.current)
       if (toastTimer.current) window.clearTimeout(toastTimer.current)
       if (hlsRef.current) {
         hlsRef.current.stopLoad()
@@ -411,7 +467,7 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
         video.load()
       }
     }
-  }, [streamUrl, loadStream, addRecent, channel.id])
+  }, [streamUrl, loadStream, addRecent, channel.id, cancelCountdown])
 
   // Keybindings
   useEffect(() => {
@@ -422,10 +478,10 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
 
       if (e.key === 'ArrowUp' || e.key === 'ArrowLeft' || e.key === '[' || e.key === 'p' || e.key === 'P') {
         e.preventDefault()
-        if (prevChannel) switchChannel(prevChannel)
+        if (prevChannel) switchChannelCleanly(prevChannel)
       } else if (e.key === 'ArrowDown' || e.key === 'ArrowRight' || e.key === ']' || e.key === 'n' || e.key === 'N') {
         e.preventDefault()
-        if (nextChannel) switchChannel(nextChannel)
+        if (nextChannel) switchChannelCleanly(nextChannel)
       } else if (e.key === 'Escape' || e.key === 'Backspace') {
         e.preventDefault()
         if (showChannelList) {
@@ -445,7 +501,7 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
 
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [prevChannel, nextChannel, switchChannel, handleBack, showChannelList, togglePlayPause, toggleFullscreen, toggleMute, handleMouseMove])
+  }, [prevChannel, nextChannel, switchChannelCleanly, handleBack, showChannelList, togglePlayPause, toggleFullscreen, toggleMute, handleMouseMove])
 
   const [currentTimestamp] = useState(() => Date.now())
   const nowPlaying = useMemo(() => getCurrentProgram(programs, currentTimestamp), [programs, currentTimestamp])
@@ -491,7 +547,7 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
             {nextChannel && (
               <button
                 className="player__overlay-btn player__overlay-btn--skip"
-                onClick={() => switchChannel(nextChannel)}
+                onClick={() => switchChannelCleanly(nextChannel)}
                 aria-label="Skip to next channel"
               >
                 Skip Channel ⏭
@@ -528,27 +584,57 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
       {/* Error Overlay */}
       {hasError && (
         <div className="player__state-overlay player__state-overlay--error">
-          <p>⚠️ Unable to play this stream directly</p>
-          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', justifyContent: 'center' }}>
+          <div className="player__connecting-content">
+            <p className="player__connecting-title">⚠️ Stream Unavailable</p>
+            <p className="player__connecting-sub">
+              {isProxied
+                ? 'Unable to connect directly or via edge proxy.'
+                : 'Direct stream connection could not be established.'}
+            </p>
+            {autoSkipCountdown !== null && (
+              <p className="player__error-countdown">
+                Auto-advancing in {autoSkipCountdown}s…{' '}
+                <button
+                  className="player__countdown-cancel"
+                  onClick={cancelCountdown}
+                  type="button"
+                >
+                  Cancel
+                </button>
+              </p>
+            )}
+          </div>
+          <div className="player__connecting-actions">
             {streamUrl && (
               <button
-                className="player__overlay-btn"
-                onClick={() => loadStream(streamUrl, true)}
+                className="player__overlay-btn player__overlay-btn--retry"
+                onClick={() => loadStream(streamUrl, !isProxied)}
               >
-                Retry via Edge Proxy ⚡
+                {isProxied ? 'Retry Direct ↺' : 'Try Relay Proxy ⚡'}
+              </button>
+            )}
+            {channelStreams.length > 1 && (
+              <button
+                className="player__overlay-btn"
+                onClick={handleNextStreamCandidate}
+              >
+                Alternate Stream ({activeStreamIdx + 1}/{channelStreams.length})
               </button>
             )}
             {nextChannel && (
               <button
                 className="player__overlay-btn player__overlay-btn--skip"
-                onClick={() => switchChannel(nextChannel)}
+                onClick={() => switchChannelCleanly(nextChannel)}
               >
-                Next Channel →
+                Next Channel ⏭
               </button>
             )}
             <button
               className="player__overlay-btn player__overlay-btn--back"
-              onClick={handleBack}
+              onClick={() => {
+                cancelCountdown()
+                handleBack()
+              }}
             >
               ← Back
             </button>
@@ -606,7 +692,7 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
           <div className="player__ch-nav">
             <button
               className="player__ch-btn"
-              onClick={() => prevChannel && switchChannel(prevChannel)}
+              onClick={() => prevChannel && switchChannelCleanly(prevChannel)}
               disabled={!prevChannel}
               aria-label="Previous channel"
             >
@@ -619,7 +705,7 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
 
             <button
               className="player__ch-btn"
-              onClick={() => nextChannel && switchChannel(nextChannel)}
+              onClick={() => nextChannel && switchChannelCleanly(nextChannel)}
               disabled={!nextChannel}
               aria-label="Next channel"
             >

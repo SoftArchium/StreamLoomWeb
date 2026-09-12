@@ -92,6 +92,31 @@
   color: var(--text-secondary);
 }
 
+.player__error-countdown {
+  font-size: 13px;
+  color: #ff7675;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.player__countdown-cancel {
+  background: rgba(255, 255, 255, 0.15);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  color: #fff;
+  border-radius: 4px;
+  padding: 3px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.player__countdown-cancel:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
 .player__connecting-actions {
   display: flex;
   align-items: center;

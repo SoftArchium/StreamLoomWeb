@@ -9,7 +9,7 @@ export function Settings() {
     return localStorage.getItem('sl_low_latency') !== 'false'
   })
   const [autoSkip, setAutoSkip] = useState(() => {
-    return localStorage.getItem('sl_auto_skip') !== 'false'
+    return localStorage.getItem('sl_auto_skip') === 'true'
   })
   const [brokenCount, setBrokenCount] = useState(() => getBrokenCount())
   const [clearedNotice, setClearedNotice] = useState(false)
@@ -36,6 +36,7 @@ export function Settings() {
 
   const handleClearCache = () => {
     try {
+      localStorage.removeItem('sl_catalogue_v5')
       localStorage.removeItem('sl_catalogue_v4')
       localStorage.removeItem('sl_catalogue_v3')
       localStorage.removeItem('sl_catalogue_v2')

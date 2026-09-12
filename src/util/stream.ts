@@ -3,8 +3,13 @@
  * and broken-stream state management.
  */
 
-const BROKEN_STREAMS_KEY = 'sl_broken_streams_v1'
+const BROKEN_STREAMS_KEY = 'sl_broken_streams_v2'
 const BROKEN_TTL_MS = 24 * 60 * 60 * 1000 // 24 hours
+
+// Invalidate and purge legacy v1 cache to unblock falsely marked channels
+try {
+  localStorage.removeItem('sl_broken_streams_v1')
+} catch {}
 
 interface BrokenRecord {
   timestamp: number
@@ -46,8 +51,10 @@ export function markStreamBroken(channelId: string) {
 export function unmarkStreamBroken(channelId: string) {
   try {
     const map = getBrokenMap()
-    delete map[channelId]
-    localStorage.setItem(BROKEN_STREAMS_KEY, JSON.stringify(map))
+    if (map[channelId]) {
+      delete map[channelId]
+      localStorage.setItem(BROKEN_STREAMS_KEY, JSON.stringify(map))
+    }
   } catch {
     // ignore
   }
@@ -60,6 +67,7 @@ export function getBrokenCount(): number {
 export function clearBrokenStreams() {
   try {
     localStorage.removeItem(BROKEN_STREAMS_KEY)
+    localStorage.removeItem('sl_broken_streams_v1')
   } catch {
     // ignore
   }
@@ -67,8 +75,13 @@ export function clearBrokenStreams() {
 
 /**
  * Builds the proxy URL for a given stream endpoint.
+ * Protects against double-proxying.
  */
 export function getProxyStreamUrl(rawUrl: string, userAgent?: string | null, referrer?: string | null): string {
+  if (!rawUrl) return ''
+  if (rawUrl.startsWith('/api/proxy') || rawUrl.includes('/api/proxy?url=')) {
+    return rawUrl
+  }
   const params = new URLSearchParams()
   params.set('url', rawUrl)
   if (userAgent) params.set('ua', userAgent)
@@ -82,4 +95,28 @@ export function getProxyStreamUrl(rawUrl: string, userAgent?: string | null, ref
 export function isMixedContent(url: string): boolean {
   if (typeof window === 'undefined') return false
   return window.location.protocol === 'https:' && url.startsWith('http://')
+}
+
+/**
+ * Upgrades http:// to https://
+ */
+export function tryUpgradeToHttps(url: string): string {
+  if (url.startsWith('http://')) {
+    return url.replace(/^http:\/\//i, 'https://')
+  }
+  return url
+}
+
+/**
+ * Checks if a response payload is HTML (e.g. SPA index.html returned by unconfigured proxy).
+ */
+export function isHtmlResponse(text: string): boolean {
+  if (!text) return false
+  const trimmed = text.trimStart().toLowerCase()
+  return (
+    trimmed.startsWith('<!doctype html') ||
+    trimmed.startsWith('<html') ||
+    trimmed.startsWith('<head') ||
+    trimmed.startsWith('<body')
+  )
 }

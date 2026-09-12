@@ -14,6 +14,7 @@ import {
 
 export interface EnrichedChannel extends Channel {
   stream: Stream | undefined
+  streams: Stream[]
   categoryIds: string[]
 }
 
@@ -29,8 +30,13 @@ interface UseChannelsResult {
 }
 
 // ---- LocalStorage catalogue cache ----
-const CACHE_KEY = 'sl_catalogue_v4'
+const CACHE_KEY = 'sl_catalogue_v5'
 const CACHE_TTL_MS = 60 * 60 * 1000 // 1 hour
+
+// Purge legacy v4 cache if present
+try {
+  localStorage.removeItem('sl_catalogue_v4')
+} catch {}
 
 interface CacheEntry {
   channels: EnrichedChannel[]
@@ -77,17 +83,33 @@ function enrichChannels(
   rawChannels: { id: string; name: string; logo: string | null; country: string | null; is_active: boolean; channel_categories: { category_id: string }[] }[],
   streams: { channel_id: string | null; url: string; quality: string | null; status: string | null }[]
 ): EnrichedChannel[] {
-  const streamMap = new Map<string, Stream>()
+  const streamMap = new Map<string, Stream[]>()
   for (const s of streams) {
-    if (s.channel_id && !streamMap.has(s.channel_id)) {
-      streamMap.set(s.channel_id, s as Stream)
+    if (!s.channel_id) continue
+    let list = streamMap.get(s.channel_id)
+    if (!list) {
+      list = []
+      streamMap.set(s.channel_id, list)
     }
+    list.push(s as Stream)
   }
-  return rawChannels.map((ch) => ({
-    ...(ch as Channel),
-    stream: streamMap.get(ch.id),
-    categoryIds: ch.channel_categories.map((c) => c.category_id),
-  }))
+
+  return rawChannels.map((ch) => {
+    const channelStreams = streamMap.get(ch.id) || []
+    // Prioritize HTTPS streams over HTTP to prevent mixed-content blocks
+    const bestStream =
+      channelStreams.find((s) => s.url.startsWith('https://') && s.status === 'active') ||
+      channelStreams.find((s) => s.url.startsWith('https://')) ||
+      channelStreams.find((s) => s.url.startsWith('http://') && s.status === 'active') ||
+      channelStreams[0]
+
+    return {
+      ...(ch as Channel),
+      stream: bestStream,
+      streams: channelStreams,
+      categoryIds: ch.channel_categories.map((c) => c.category_id),
+    }
+  })
 }
 
 async function loadData(force = false) {
