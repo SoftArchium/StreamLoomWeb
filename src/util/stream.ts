@@ -177,11 +177,56 @@ export function clearWorkingStreams() {
   }
 }
 
+export interface EdgeStreamCheckResult {
+  channelId: string
+  workingStream: string | null
+  workingCandidates: string[]
+  deadCandidates: string[]
+  edgeNode?: string
+  timestamp: number
+}
+
+/**
+ * Probes candidate stream URLs via edge node (/api/streams)
+ * Returns pre-filtered working and dead stream candidates.
+ */
+export async function fetchEdgeVerifiedStreams(
+  channelId: string,
+  candidateUrls: string[],
+  timeoutMs = 3000
+): Promise<EdgeStreamCheckResult | null> {
+  if (!candidateUrls || candidateUrls.length === 0) return null
+  try {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), timeoutMs)
+    const params = new URLSearchParams()
+    params.set('channelId', channelId)
+    params.set('urls', candidateUrls.join(','))
+
+    const res = await fetch(`/api/streams?${params.toString()}`, {
+      method: 'GET',
+      signal: controller.signal,
+    })
+    clearTimeout(timer)
+    if (!res.ok) return null
+    const data = (await res.json()) as EdgeStreamCheckResult
+    return data
+  } catch {
+    return null
+  }
+}
+
 /**
  * Builds the proxy URL for a given stream endpoint.
- * Protects against double-proxying.
+ * Protects against double-proxying and appends multi-candidate fallbacks.
  */
-export function getProxyStreamUrl(rawUrl: string, userAgent?: string | null, referrer?: string | null): string {
+export function getProxyStreamUrl(
+  rawUrl: string,
+  userAgent?: string | null,
+  referrer?: string | null,
+  fallbacks?: string[],
+  channelId?: string
+): string {
   if (!rawUrl) return ''
   if (rawUrl.startsWith('/api/proxy') || rawUrl.includes('/api/proxy?url=')) {
     return rawUrl
@@ -190,6 +235,16 @@ export function getProxyStreamUrl(rawUrl: string, userAgent?: string | null, ref
   params.set('url', rawUrl)
   if (userAgent) params.set('ua', userAgent)
   if (referrer) params.set('ref', referrer)
+  if (fallbacks && fallbacks.length > 0) {
+    for (const fb of fallbacks) {
+      if (fb && fb !== rawUrl) {
+        params.append('fallback', fb)
+      }
+    }
+  }
+  if (channelId) {
+    params.set('channelId', channelId)
+  }
   return `/api/proxy?${params.toString()}`
 }
 

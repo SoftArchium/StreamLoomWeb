@@ -13,6 +13,7 @@ import {
   tryUpgradeToHttps,
   getCachedWorkingStream,
   cacheWorkingStream,
+  fetchEdgeVerifiedStreams,
 } from '../util/stream'
 import './VideoPlayer.css'
 
@@ -124,6 +125,28 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
     isProxiedRef.current = isProxied
     channelStreamsRef.current = channelStreams
   }, [activeStreamIdx, isProxied, channelStreams])
+
+  // Proactively check edge-verified working stream for this POP if channel has multiple candidates
+  useEffect(() => {
+    if (!channelStreams || channelStreams.length <= 1) return
+    const cached = getCachedWorkingStream(channel.id)
+    if (cached) return
+
+    let cancelled = false
+    const urls = channelStreams.map((s) => s.url)
+    fetchEdgeVerifiedStreams(channel.id, urls).then((result) => {
+      if (cancelled || !result || !result.workingStream) return
+      cacheWorkingStream(channel.id, result.workingStream, isProxiedRef.current)
+      const matchIdx = channelStreamsRef.current.findIndex((s) => s.url === result.workingStream)
+      if (matchIdx > 0 && activeStreamIdxRef.current === 0) {
+        setActiveStreamIdx(matchIdx)
+      }
+    })
+
+    return () => {
+      cancelled = true
+    }
+  }, [channel.id, channelStreams])
 
   const currentStream = channelStreams[activeStreamIdx] || channel.stream
   const streamUrl = currentStream?.url
@@ -500,7 +523,16 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
     // Determine target playback URL
     let targetUrl = rawUrl
     if (isProxied) {
-      targetUrl = getProxyStreamUrl(rawUrl)
+      const fallbackUrls = channelStreams
+        .filter((_, idx) => idx !== activeStreamIdx)
+        .map((s) => s.url)
+      targetUrl = getProxyStreamUrl(
+        rawUrl,
+        null,
+        null,
+        fallbackUrls,
+        channel.id
+      )
     } else if (isMixedContent(rawUrl)) {
       targetUrl = tryUpgradeToHttps(rawUrl)
     }
@@ -545,6 +577,14 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
               const ct = (xhr.getResponseHeader('Content-Type') || '').toLowerCase()
               if (ct.includes('text/html')) {
                 xhr.abort()
+              }
+              const resolvedStream = xhr.getResponseHeader('X-Stream-Resolved')
+              if (resolvedStream && resolvedStream !== rawUrl) {
+                cacheWorkingStream(channel.id, resolvedStream, true)
+                const matchIdx = channelStreamsRef.current.findIndex((s) => s.url === resolvedStream)
+                if (matchIdx >= 0) {
+                  activeStreamIdxRef.current = matchIdx
+                }
               }
             }
           })
