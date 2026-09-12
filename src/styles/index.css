@@ -27,6 +27,7 @@
   --text-on-accent: #ffffff;
 
   --border: rgba(255, 255, 255, 0.07);
+  --border-subtle: rgba(255, 255, 255, 0.07);
   --border-hover: rgba(255, 255, 255, 0.15);
   --shadow-card: 0 4px 24px rgba(0, 0, 0, 0.6);
   --shadow-glow: 0 0 32px var(--accent-glow);
@@ -63,6 +64,47 @@
   --sar: env(safe-area-inset-right, 0px);
   --sab: env(safe-area-inset-bottom, 0px);
   --sal: env(safe-area-inset-left, 0px);
+
+  /* Channel Logo Display & Contrast Enhancement */
+  --logo-tile-bg: rgba(255, 255, 255, 0.08);
+  --logo-tile-bg-hover: rgba(255, 255, 255, 0.12);
+  --logo-tile-border: rgba(255, 255, 255, 0.12);
+  --logo-pedestal: rgba(255, 255, 255, 0.08);
+  --logo-filter: drop-shadow(0 0 1.5px rgba(255, 255, 255, 0.55)) drop-shadow(0 3px 6px rgba(0, 0, 0, 0.5));
+}
+
+/* ---------- Light Theme: Alabaster Silk (Super Classy & Tailored) ---------- */
+[data-theme="light"] {
+  --bg-void: #eaeaf0;
+  --bg-base: #f4f4f7;
+  --bg-surface: #ffffff;
+  --bg-card: #ffffff;
+  --bg-card-hover: #f7f7fa;
+  --bg-glass: rgba(255, 255, 255, 0.84);
+  --bg-glass-hover: rgba(255, 255, 255, 0.95);
+
+  --accent: #6052dd;
+  --accent-2: #0284c7;
+  --accent-glow: rgba(96, 82, 221, 0.25);
+  --accent-gradient: linear-gradient(135deg, #6052dd 0%, #0284c7 100%);
+
+  --text-primary: #12131a;
+  --text-secondary: #58596b;
+  --text-muted: #8b8d9f;
+  --text-on-accent: #ffffff;
+
+  --border: rgba(0, 0, 0, 0.08);
+  --border-subtle: rgba(0, 0, 0, 0.08);
+  --border-hover: rgba(0, 0, 0, 0.16);
+  --shadow-card: 0 4px 20px rgba(0, 0, 0, 0.06), 0 1px 3px rgba(0, 0, 0, 0.04);
+  --shadow-glow: 0 0 24px var(--accent-glow);
+
+  /* Channel Logo Display & Contrast */
+  --logo-tile-bg: rgba(0, 0, 0, 0.03);
+  --logo-tile-bg-hover: rgba(0, 0, 0, 0.06);
+  --logo-tile-border: rgba(0, 0, 0, 0.07);
+  --logo-pedestal: rgba(0, 0, 0, 0.02);
+  --logo-filter: drop-shadow(0 2px 5px rgba(0, 0, 0, 0.1));
 }
 
 /* ---------- Reset ---------- */
@@ -82,6 +124,7 @@ body {
   min-height: 100dvh;
   overflow-x: hidden;
   -webkit-tap-highlight-color: transparent;
+  transition: background-color var(--duration-base) var(--ease-out), color var(--duration-base) var(--ease-out);
 }
 
 img { display: block; max-width: 100%; }

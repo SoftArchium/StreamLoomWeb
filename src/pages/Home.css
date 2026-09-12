@@ -280,7 +280,7 @@
 }
 
 .filter-select option {
-  background: #151624;
+  background: var(--bg-card);
   color: var(--text-primary);
 }
 

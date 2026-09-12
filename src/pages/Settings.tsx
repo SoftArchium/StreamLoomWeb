@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useChannels } from '../hooks/useChannels'
+import { useTheme } from '../hooks/useTheme'
 import {
   getBrokenCount,
   clearBrokenStreams,
@@ -12,6 +13,7 @@ import './Settings.css'
 
 export function Settings() {
   const { channels, allChannels, refresh } = useChannels()
+  const { theme, setTheme } = useTheme()
   const [lowLatency, setLowLatency] = useState(() => {
     return localStorage.getItem('sl_low_latency') !== 'false'
   })
@@ -81,6 +83,51 @@ export function Settings() {
       </div>
 
       <div className="settings-grid">
+        {/* Appearance & Theme Section */}
+        <section className="settings-card glass">
+          <div className="settings-card__header">
+            <span className="settings-card__icon">🎨</span>
+            <div>
+              <h3>Appearance & Theme</h3>
+              <p>Personalize your visual experience with curated luxury palettes</p>
+            </div>
+          </div>
+          <div className="settings-card__body">
+            <div className="settings-item settings-item--theme">
+              <div className="settings-item__info">
+                <strong>Color Palette</strong>
+                <span>
+                  {theme === 'dark'
+                    ? 'Obsidian Velvet (Deep dark background with high-contrast channel badges)'
+                    : 'Alabaster Silk (Warm cashmere light background with crisp typography)'}
+                </span>
+              </div>
+              <div className="theme-toggle-group" role="radiogroup" aria-label="Theme selection">
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={theme === 'dark'}
+                  className={`theme-toggle-btn ${theme === 'dark' ? 'theme-toggle-btn--active' : ''}`}
+                  onClick={() => setTheme('dark')}
+                >
+                  <span className="theme-toggle-btn__icon">🌙</span>
+                  <span className="theme-toggle-btn__label">Dark</span>
+                </button>
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={theme === 'light'}
+                  className={`theme-toggle-btn ${theme === 'light' ? 'theme-toggle-btn--active' : ''}`}
+                  onClick={() => setTheme('light')}
+                >
+                  <span className="theme-toggle-btn__icon">☀️</span>
+                  <span className="theme-toggle-btn__label">Light</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </section>
+
         {/* Playback Section */}
         <section className="settings-card glass">
           <div className="settings-card__header">

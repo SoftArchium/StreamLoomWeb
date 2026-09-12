@@ -13,6 +13,20 @@
     <meta name="description" content="Watch thousands of live TV channels from around the world. Free, no registration. StreamLoom Web is a Progressive Web App — install it on any device." />
     <meta name="theme-color" content="#0a0a0f" />
 
+    <script>
+      (function() {
+        try {
+          var theme = localStorage.getItem('sl_theme') || 'dark';
+          document.documentElement.setAttribute('data-theme', theme);
+          if (theme === 'light') {
+            document.documentElement.classList.add('light-theme');
+          } else {
+            document.documentElement.classList.add('dark-theme');
+          }
+        } catch (e) {}
+      })();
+    </script>
+
     <!-- PWA -->
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="apple-touch-icon" href="/icons/icon-192.png" />

@@ -1,10 +1,12 @@
 import { NavLink } from 'react-router-dom'
 import { useChannels, useFavourites } from '../hooks/useChannels'
+import { useTheme } from '../hooks/useTheme'
 import './Navbar.css'
 
 export function Navbar() {
   const { loading, refresh } = useChannels()
   const { favouriteIds } = useFavourites()
+  const { isDark, toggleTheme } = useTheme()
   const favCount = favouriteIds.size
 
   return (
@@ -32,6 +34,14 @@ export function Navbar() {
 
         <div className="navbar__actions">
           {loading && <span className="navbar__spinner" title="Loading catalogue…" />}
+          <button
+            className="navbar__icon-btn navbar__icon-btn--theme"
+            onClick={toggleTheme}
+            title={isDark ? 'Switch to Light mode' : 'Switch to Dark mode'}
+            aria-label={isDark ? 'Switch to Light mode' : 'Switch to Dark mode'}
+          >
+            {isDark ? '☀️' : '🌙'}
+          </button>
           <button
             className="navbar__icon-btn"
             onClick={refresh}
@@ -75,6 +85,16 @@ export function Navbar() {
           </span>
           <span className="mobile-nav__label">Favourites</span>
         </NavLink>
+
+        <button
+          type="button"
+          className="mobile-nav__item"
+          onClick={toggleTheme}
+          aria-label={isDark ? 'Switch to Light mode' : 'Switch to Dark mode'}
+        >
+          <span className="mobile-nav__icon">{isDark ? '☀️' : '🌙'}</span>
+          <span className="mobile-nav__label">{isDark ? 'Light' : 'Dark'}</span>
+        </button>
 
         <NavLink
           to="/settings"
