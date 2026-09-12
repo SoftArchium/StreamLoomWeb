@@ -20,6 +20,7 @@ export interface EnrichedChannel extends Channel {
 
 interface UseChannelsResult {
   channels: EnrichedChannel[]
+  allChannels: EnrichedChannel[]
   categories: Category[]
   epgChannelIds: Set<string>
   loading: boolean
@@ -79,7 +80,16 @@ function notify() {
   _listeners.forEach((fn) => fn())
 }
 
-import { getCachedWorkingStream } from '../util/stream'
+import {
+  getCachedWorkingStream,
+  getBrokenSet,
+  isHideBrokenStreamsEnabled,
+  onStreamStateChange,
+} from '../util/stream'
+
+onStreamStateChange(() => {
+  notify()
+})
 
 function enrichChannels(
   rawChannels: { id: string; name: string; logo: string | null; country: string | null; is_active: boolean; channel_categories: { category_id: string }[] }[],
@@ -222,8 +232,16 @@ export function useChannels(): UseChannelsResult {
 
   const refresh = useCallback(() => loadData(true), [])
 
+  const raw = _channels ?? []
+  const hideBroken = isHideBrokenStreamsEnabled()
+  const brokenSet = getBrokenSet()
+  const filtered = hideBroken && brokenSet.size > 0
+    ? raw.filter((c) => !brokenSet.has(c.id))
+    : raw
+
   return {
-    channels: _channels ?? [],
+    channels: filtered,
+    allChannels: raw,
     categories: _categories ?? [],
     epgChannelIds: _epgIds ?? new Set(),
     loading: _loading,

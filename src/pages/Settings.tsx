@@ -1,19 +1,34 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useChannels } from '../hooks/useChannels'
-import { getBrokenCount, clearBrokenStreams, clearWorkingStreams } from '../util/stream'
+import {
+  getBrokenCount,
+  clearBrokenStreams,
+  clearWorkingStreams,
+  isHideBrokenStreamsEnabled,
+  setHideBrokenStreamsEnabled,
+  onStreamStateChange,
+} from '../util/stream'
 import './Settings.css'
 
 export function Settings() {
-  const { channels, refresh } = useChannels()
+  const { channels, allChannels, refresh } = useChannels()
   const [lowLatency, setLowLatency] = useState(() => {
     return localStorage.getItem('sl_low_latency') !== 'false'
   })
   const [autoSkip, setAutoSkip] = useState(() => {
     return localStorage.getItem('sl_auto_skip') === 'true'
   })
+  const [hideBroken, setHideBroken] = useState(() => isHideBrokenStreamsEnabled())
   const [brokenCount, setBrokenCount] = useState(() => getBrokenCount())
   const [clearedNotice, setClearedNotice] = useState(false)
   const [clearedBrokenNotice, setClearedBrokenNotice] = useState(false)
+
+  useEffect(() => {
+    return onStreamStateChange(() => {
+      setBrokenCount(getBrokenCount())
+      setHideBroken(isHideBrokenStreamsEnabled())
+    })
+  }, [])
 
   const handleLowLatencyChange = (enabled: boolean) => {
     setLowLatency(enabled)
@@ -23,6 +38,11 @@ export function Settings() {
   const handleAutoSkipChange = (enabled: boolean) => {
     setAutoSkip(enabled)
     localStorage.setItem('sl_auto_skip', enabled ? 'true' : 'false')
+  }
+
+  const handleHideBrokenChange = (enabled: boolean) => {
+    setHideBroken(enabled)
+    setHideBrokenStreamsEnabled(enabled)
   }
 
   const handleClearBrokenStreams = () => {
@@ -100,6 +120,21 @@ export function Settings() {
                 <span className="toggle-slider" />
               </label>
             </div>
+
+            <div className="settings-item">
+              <div className="settings-item__info">
+                <strong>Hide Failed Channels</strong>
+                <span>Exclude channels whose streams fail to load from the guide, home grid, and channel lists</span>
+              </div>
+              <label className="toggle-switch">
+                <input
+                  type="checkbox"
+                  checked={hideBroken}
+                  onChange={(e) => handleHideBrokenChange(e.target.checked)}
+                />
+                <span className="toggle-slider" />
+              </label>
+            </div>
           </div>
         </section>
 
@@ -116,7 +151,9 @@ export function Settings() {
             <div className="settings-item">
               <div className="settings-item__info">
                 <strong>Cached Channels</strong>
-                <span>{channels.length} channels loaded & indexed locally</span>
+                <span>
+                  {channels.length} {hideBroken && allChannels && allChannels.length !== channels.length ? `visible (${allChannels.length} total)` : 'channels'} indexed locally
+                </span>
               </div>
               <button
                 className="settings-btn settings-btn--danger"
@@ -130,7 +167,9 @@ export function Settings() {
             <div className="settings-item">
               <div className="settings-item__info">
                 <strong>Unavailable Channels Log</strong>
-                <span>{brokenCount} unresponsive channels flagged for auto-bypass</span>
+                <span>
+                  {brokenCount} unresponsive {brokenCount === 1 ? 'channel' : 'channels'} flagged {hideBroken ? '(hidden from lists)' : '(shown in lists)'}
+                </span>
               </div>
               <button
                 className="settings-btn"

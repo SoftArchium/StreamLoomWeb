@@ -35,7 +35,7 @@ StreamLoomWeb/
 │   │   ├── Home.tsx           # Category rails, infinite grid, continue watching
 │   │   ├── Guide.tsx          # Interactive EPG grid aligned to current time
 │   │   ├── Watch.tsx          # Fullscreen / embedded playback route
-│   │   └── Settings.tsx       # Latency profile, auto-skip toggle, cache clear
+│   │   └── Settings.tsx       # Latency profile, auto-skip & hide-broken toggles, cache clear
 │   ├── util/
 │   │   ├── stream.ts          # Stream caching, proxy formatting, mixed-content checks
 │   │   ├── country.ts         # Country code resolution and flag rendering

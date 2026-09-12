@@ -62,7 +62,7 @@ StreamLoomWeb/
 │   │   ├── Home.tsx          # Channel grid, category rails, continue watching
 │   │   ├── Guide.tsx         # EPG timeline guide
 │   │   ├── Watch.tsx         # Video playback route with playlist memory
-│   │   └── Settings.tsx      # Low-latency toggle, broken channel reset, cache management
+│   │   └── Settings.tsx      # Low-latency, auto-skip, hide-broken toggles, cache reset
 │   ├── util/
 │   │   ├── stream.ts         # Edge proxy URL generator, working stream cache, broken stream registry
 │   │   ├── country.ts        # Country code to flag/name formatting

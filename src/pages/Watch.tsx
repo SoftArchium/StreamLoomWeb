@@ -2,16 +2,17 @@ import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import { useMemo } from 'react'
 import { useChannels } from '../hooks/useChannels'
 import type { EnrichedChannel } from '../hooks/useChannels'
+import { isHideBrokenStreamsEnabled, isStreamBroken } from '../util/stream'
 import { VideoPlayer } from '../components/VideoPlayer'
 
 export function Watch() {
   const { channelId } = useParams<{ channelId: string }>()
-  const { channels, loading } = useChannels()
+  const { channels, allChannels, loading } = useChannels()
   const navigate = useNavigate()
   const location = useLocation()
 
   const channelIdParam = channelId ? decodeURIComponent(channelId) : ''
-  const channel = channels.find((c) => c.id === channelId || c.id === channelIdParam)
+  const channel = (allChannels ?? channels).find((c) => c.id === channelId || c.id === channelIdParam)
 
   // Retrieve playlist from route state OR fallback to sessionStorage
   const playlistIds = useMemo(() => {
@@ -45,14 +46,21 @@ export function Watch() {
     return sessionStorage.getItem('sl_return_to') || '/'
   }, [location.state])
 
-  const channelMap = useMemo(() => new Map(channels.map((c) => [c.id, c])), [channels])
+  const channelMap = useMemo(
+    () => new Map((allChannels ?? channels).map((c) => [c.id, c])),
+    [allChannels, channels]
+  )
 
   // Preserve the exact list and order from the screen the user came from
   const orderedPlaylist = useMemo(() => {
+    const hideBroken = isHideBrokenStreamsEnabled()
     if (playlistIds && Array.isArray(playlistIds) && playlistIds.length > 1) {
       const list = playlistIds
         .map((id) => channelMap.get(id))
-        .filter((c): c is EnrichedChannel => Boolean(c?.stream))
+        .filter(
+          (c): c is EnrichedChannel =>
+            Boolean(c?.stream && (!hideBroken || c.id === channel?.id || !isStreamBroken(c.id)))
+        )
       if (list.length > 1 && channel && list.some((c) => c.id === channel.id)) {
         return list
       }

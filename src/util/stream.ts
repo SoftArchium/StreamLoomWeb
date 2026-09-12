@@ -33,9 +33,54 @@ function getBrokenMap(): Record<string, BrokenRecord> {
   }
 }
 
-export function isStreamBroken(channelId: string): boolean {
+const HIDE_BROKEN_KEY = 'sl_hide_broken'
+
+let _cachedHideBroken: boolean | null = null
+let _cachedBrokenSet: Set<string> | null = null
+const _streamListeners = new Set<() => void>()
+
+export function onStreamStateChange(listener: () => void): () => void {
+  _streamListeners.add(listener)
+  return () => {
+    _streamListeners.delete(listener)
+  }
+}
+
+export function notifyStreamStateChange() {
+  _streamListeners.forEach((fn) => {
+    try {
+      fn()
+    } catch {}
+  })
+}
+
+export function isHideBrokenStreamsEnabled(): boolean {
+  if (_cachedHideBroken !== null) return _cachedHideBroken
+  try {
+    _cachedHideBroken = localStorage.getItem(HIDE_BROKEN_KEY) !== 'false'
+  } catch {
+    _cachedHideBroken = true
+  }
+  return _cachedHideBroken
+}
+
+export function setHideBrokenStreamsEnabled(enabled: boolean) {
+  _cachedHideBroken = enabled
+  try {
+    localStorage.setItem(HIDE_BROKEN_KEY, enabled ? 'true' : 'false')
+  } catch {}
+  notifyStreamStateChange()
+}
+
+export function getBrokenSet(): Set<string> {
+  if (_cachedBrokenSet) return _cachedBrokenSet
   const map = getBrokenMap()
-  return Boolean(map[channelId])
+  _cachedBrokenSet = new Set(Object.keys(map))
+  return _cachedBrokenSet
+}
+
+export function isStreamBroken(channelId: string): boolean {
+  return getBrokenSet().has(channelId)
 }
 
 export function markStreamBroken(channelId: string) {
@@ -43,6 +88,8 @@ export function markStreamBroken(channelId: string) {
     const map = getBrokenMap()
     map[channelId] = { timestamp: Date.now() }
     localStorage.setItem(BROKEN_STREAMS_KEY, JSON.stringify(map))
+    _cachedBrokenSet = null
+    notifyStreamStateChange()
   } catch {
     // ignore quota
   }
@@ -54,6 +101,8 @@ export function unmarkStreamBroken(channelId: string) {
     if (map[channelId]) {
       delete map[channelId]
       localStorage.setItem(BROKEN_STREAMS_KEY, JSON.stringify(map))
+      _cachedBrokenSet = null
+      notifyStreamStateChange()
     }
   } catch {
     // ignore
@@ -61,13 +110,15 @@ export function unmarkStreamBroken(channelId: string) {
 }
 
 export function getBrokenCount(): number {
-  return Object.keys(getBrokenMap()).length
+  return getBrokenSet().size
 }
 
 export function clearBrokenStreams() {
   try {
     localStorage.removeItem(BROKEN_STREAMS_KEY)
     localStorage.removeItem('sl_broken_streams_v1')
+    _cachedBrokenSet = null
+    notifyStreamStateChange()
   } catch {
     // ignore
   }
