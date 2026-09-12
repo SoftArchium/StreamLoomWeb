@@ -1,48 +1,53 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
 
-    <!-- Fonts -->
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
 
-    <!-- SEO -->
-    <title>StreamLoom Web — Live TV Everywhere</title>
-    <meta name="description" content="Watch thousands of live TV channels from around the world. Free, no registration. StreamLoom Web is a Progressive Web App — install it on any device." />
-    <meta name="theme-color" content="#0a0a0f" />
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 
-    <script>
-      (function() {
-        try {
-          var theme = localStorage.getItem('sl_theme') || 'dark';
-          document.documentElement.setAttribute('data-theme', theme);
-          if (theme === 'light') {
-            document.documentElement.classList.add('light-theme');
-          } else {
-            document.documentElement.classList.add('dark-theme');
-          }
-        } catch (e) {}
-      })();
-    </script>
+  <!-- SEO -->
+  <title>StreamLoom Web - Live TV Everywhere</title>
+  <meta name="description"
+    content="Watch thousands of live TV channels from around the world. Free, no registration. StreamLoom Web is a Progressive Web App — install it on any device." />
+  <meta name="theme-color" content="#0a0a0f" />
 
-    <!-- PWA -->
-    <link rel="manifest" href="/manifest.webmanifest" />
-    <link rel="apple-touch-icon" href="/icons/icon-192.png" />
-    <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <meta name="apple-mobile-web-app-title" content="StreamLoom" />
+  <script>
+    (function () {
+      try {
+        var theme = localStorage.getItem('sl_theme') || 'dark';
+        document.documentElement.setAttribute('data-theme', theme);
+        if (theme === 'light') {
+          document.documentElement.classList.add('light-theme');
+        } else {
+          document.documentElement.classList.add('dark-theme');
+        }
+      } catch (e) { }
+    })();
+  </script>
 
-    <!-- Open Graph -->
-    <meta property="og:title" content="StreamLoom Web — Live TV Everywhere" />
-    <meta property="og:description" content="Thousands of live TV channels, EPG guide, favourites, and no sign-up required." />
-    <meta property="og:type" content="website" />
+  <!-- PWA -->
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="/icons/icon-192.png" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="StreamLoom" />
 
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
-  </body>
+  <!-- Open Graph -->
+  <meta property="og:title" content="StreamLoom Web — Live TV Everywhere" />
+  <meta property="og:description"
+    content="Thousands of live TV channels, EPG guide, favourites, and no sign-up required." />
+  <meta property="og:type" content="website" />
+
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+</head>
+
+<body>
+  <div id="root"></div>
+  <script type="module" src="/src/main.tsx"></script>
+</body>
+
 </html>
