@@ -233,16 +233,10 @@
 }
 
 .player__logo {
-  height: 44px;
-  max-width: 130px;
+  height: 40px;
+  max-width: 120px;
   object-fit: contain;
-  padding: 4px 10px;
-  background: var(--logo-tile-bg);
-  border: 1px solid var(--logo-tile-border);
-  border-radius: var(--radius-sm);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-  filter: var(--logo-filter);
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.6));
   flex-shrink: 0;
 }
 
@@ -589,29 +583,23 @@
 }
 
 .player__drawer-logo {
-  width: 40px;
-  height: 28px;
+  width: 36px;
+  height: 24px;
   object-fit: contain;
-  padding: 2px 6px;
-  background: var(--logo-tile-bg);
-  border: 1px solid var(--logo-tile-border);
-  border-radius: 6px;
-  filter: var(--logo-filter);
   flex-shrink: 0;
 }
 
 .player__drawer-initials {
-  width: 40px;
-  height: 28px;
+  width: 36px;
+  height: 24px;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--logo-tile-bg);
-  border: 1px solid var(--logo-tile-border);
+  background: rgba(255, 255, 255, 0.1);
   border-radius: 6px;
   font-size: 0.75rem;
   font-weight: 700;
-  color: var(--text-primary);
+  color: var(--text-muted);
   flex-shrink: 0;
 }
 

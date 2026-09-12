@@ -7,29 +7,29 @@
 
 /* ---------- Design Tokens ---------- */
 :root {
-  /* Palette */
-  --bg-void: #050508;
-  --bg-base: #0a0a0f;
-  --bg-surface: #111118;
-  --bg-card: #16161f;
-  --bg-card-hover: #1e1e2a;
-  --bg-glass: rgba(16, 16, 24, 0.72);
-  --bg-glass-hover: rgba(22, 22, 34, 0.85);
+  /* Palette: Agate Black (Deep Sleek Onyx & Graphite Styling) */
+  --bg-void: #060709;
+  --bg-base: #0c0d11;
+  --bg-surface: #13151b;
+  --bg-card: #181b22;
+  --bg-card-hover: #21252f;
+  --bg-glass: rgba(13, 15, 19, 0.82);
+  --bg-glass-hover: rgba(21, 24, 31, 0.92);
 
   --accent: #7c6ef7;
   --accent-2: #56cfdd;
   --accent-glow: rgba(124, 110, 247, 0.35);
   --accent-gradient: linear-gradient(135deg, #7c6ef7 0%, #56cfdd 100%);
 
-  --text-primary: #f0f0f5;
-  --text-secondary: #8888a0;
-  --text-muted: #505065;
+  --text-primary: #f3f4f6;
+  --text-secondary: #9499a8;
+  --text-muted: #5e6473;
   --text-on-accent: #ffffff;
 
-  --border: rgba(255, 255, 255, 0.07);
-  --border-subtle: rgba(255, 255, 255, 0.07);
-  --border-hover: rgba(255, 255, 255, 0.15);
-  --shadow-card: 0 4px 24px rgba(0, 0, 0, 0.6);
+  --border: rgba(255, 255, 255, 0.08);
+  --border-subtle: rgba(255, 255, 255, 0.08);
+  --border-hover: rgba(255, 255, 255, 0.16);
+  --shadow-card: 0 4px 24px rgba(0, 0, 0, 0.75);
   --shadow-glow: 0 0 32px var(--accent-glow);
 
   /* Spacing */
@@ -64,13 +64,6 @@
   --sar: env(safe-area-inset-right, 0px);
   --sab: env(safe-area-inset-bottom, 0px);
   --sal: env(safe-area-inset-left, 0px);
-
-  /* Channel Logo Display & Contrast Enhancement */
-  --logo-tile-bg: rgba(255, 255, 255, 0.08);
-  --logo-tile-bg-hover: rgba(255, 255, 255, 0.12);
-  --logo-tile-border: rgba(255, 255, 255, 0.12);
-  --logo-pedestal: rgba(255, 255, 255, 0.08);
-  --logo-filter: drop-shadow(0 0 1.5px rgba(255, 255, 255, 0.55)) drop-shadow(0 3px 6px rgba(0, 0, 0, 0.5));
 }
 
 /* ---------- Light Theme: Alabaster Silk (Super Classy & Tailored) ---------- */
@@ -98,13 +91,6 @@
   --border-hover: rgba(0, 0, 0, 0.16);
   --shadow-card: 0 4px 20px rgba(0, 0, 0, 0.06), 0 1px 3px rgba(0, 0, 0, 0.04);
   --shadow-glow: 0 0 24px var(--accent-glow);
-
-  /* Channel Logo Display & Contrast */
-  --logo-tile-bg: rgba(0, 0, 0, 0.03);
-  --logo-tile-bg-hover: rgba(0, 0, 0, 0.06);
-  --logo-tile-border: rgba(0, 0, 0, 0.07);
-  --logo-pedestal: rgba(0, 0, 0, 0.02);
-  --logo-filter: drop-shadow(0 2px 5px rgba(0, 0, 0, 0.1));
 }
 
 /* ---------- Reset ---------- */

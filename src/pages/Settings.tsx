@@ -98,7 +98,7 @@ export function Settings() {
                 <strong>Color Palette</strong>
                 <span>
                   {theme === 'dark'
-                    ? 'Obsidian Velvet (Deep dark background with high-contrast channel badges)'
+                    ? 'Agate Black (Deep sleek onyx & graphite styling)'
                     : 'Alabaster Silk (Warm cashmere light background with crisp typography)'}
                 </span>
               </div>

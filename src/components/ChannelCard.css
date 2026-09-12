@@ -54,55 +54,31 @@
 /* Thumbnail */
 .channel-card__thumb {
   position: relative;
-  background: radial-gradient(ellipse at 50% 50%, var(--logo-pedestal) 0%, var(--bg-surface) 75%);
+  background: var(--bg-surface);
   display: flex;
   align-items: center;
   justify-content: center;
   overflow: hidden;
-  padding: 8px;
 }
 
-.channel-card--small  .channel-card__thumb { height: 72px; padding: 6px; }
-.channel-card--medium .channel-card__thumb { height: 96px; padding: 8px; }
-.channel-card--large  .channel-card__thumb { height: 124px; padding: 12px; }
+.channel-card--small  .channel-card__thumb { height: 72px; }
+.channel-card--medium .channel-card__thumb { height: 96px; }
+.channel-card--large  .channel-card__thumb { height: 124px; }
 
 .channel-card__thumb img {
-  width: auto;
-  height: auto;
-  max-width: 90%;
-  max-height: 82%;
+  width: 100%;
+  height: 100%;
   object-fit: contain;
-  padding: 6px 12px;
-  background: var(--logo-tile-bg);
-  border: 1px solid var(--logo-tile-border);
-  border-radius: var(--radius-md);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 2px 8px rgba(0, 0, 0, 0.25);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  filter: var(--logo-filter);
-  transition:
-    transform var(--duration-base) var(--ease-out),
-    background var(--duration-fast) ease,
-    border-color var(--duration-fast) ease;
+  padding: 12px;
+  transition: transform var(--duration-base) var(--ease-out);
 }
 
-.channel-card:hover .channel-card__thumb img {
-  transform: scale(1.06);
-  background: var(--logo-tile-bg-hover);
-}
+.channel-card:hover .channel-card__thumb img { transform: scale(1.08); }
 
 .channel-card__initials {
-  width: 52px;
-  height: 52px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: var(--radius-md);
-  background: var(--logo-tile-bg);
-  border: 1px solid var(--logo-tile-border);
-  font-size: 19px;
+  font-size: 22px;
   font-weight: 700;
-  color: var(--text-primary);
+  color: var(--text-muted);
   letter-spacing: 1px;
 }
 
