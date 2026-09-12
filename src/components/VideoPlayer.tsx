@@ -14,6 +14,7 @@ import {
   getCachedWorkingStream,
   cacheWorkingStream,
   fetchEdgeVerifiedStreams,
+  isAutoSkipEnabled,
 } from '../util/stream'
 import './VideoPlayer.css'
 
@@ -114,6 +115,17 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
   })
   const [retryNonce, setRetryNonce] = useState(0)
 
+  const channelRef = useRef(channel)
+  const allChannelsRef = useRef(allChannels)
+  const activeStreamIdxRef = useRef(activeStreamIdx)
+  const isProxiedRef = useRef(isProxied)
+  const channelStreamsRef = useRef(channelStreams)
+  const stallTimer = useRef<number | null>(null)
+  const mediaRecoveryAttempts = useRef(0)
+  const hasPlayedSuccessfully = useRef(false)
+  const switchChannelCleanlyRef = useRef<(target: EnrichedChannel) => void>(() => {})
+  const failoverToNextAttemptRef = useRef<() => void>(() => {})
+
   if (channel.id !== prevChannelId) {
     setPrevChannelId(channel.id)
     setActiveStreamIdx(0)
@@ -138,15 +150,13 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
     setShowAudioMenu(false)
   }
 
-  const activeStreamIdxRef = useRef(activeStreamIdx)
-  const isProxiedRef = useRef(isProxied)
-  const channelStreamsRef = useRef(channelStreams)
-
   useEffect(() => {
+    channelRef.current = channel
+    allChannelsRef.current = allChannels
     activeStreamIdxRef.current = activeStreamIdx
     isProxiedRef.current = isProxied
     channelStreamsRef.current = channelStreams
-  }, [activeStreamIdx, isProxied, channelStreams])
+  }, [channel, allChannels, activeStreamIdx, isProxied, channelStreams])
 
   // Proactively check edge-verified working stream for this POP if channel has multiple candidates
   useEffect(() => {
@@ -263,9 +273,10 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
 
   const cancelCountdown = useCallback(() => {
     if (countdownTimerRef.current) {
-      window.clearInterval(countdownTimerRef.current)
+      window.clearTimeout(countdownTimerRef.current)
       countdownTimerRef.current = null
       setAutoSkipCountdown(null)
+      sessionStorage.removeItem('sl_autoskip_start')
     }
   }, [])
 
@@ -400,6 +411,10 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
       window.clearTimeout(connectionTimeoutTimer.current)
       connectionTimeoutTimer.current = null
     }
+    if (stallTimer.current) {
+      window.clearTimeout(stallTimer.current)
+      stallTimer.current = null
+    }
     // Immediately stop current HLS loader and media buffer to prevent lockup
     if (hlsRef.current) {
       hlsRef.current.stopLoad()
@@ -410,6 +425,7 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
     const video = videoRef.current
     if (video) {
       video.onloadedmetadata = null
+      video.onplaying = null
       video.onerror = null
       video.pause()
     }
@@ -417,10 +433,9 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
     sessionStorage.setItem('sl_last_viewed', target.id)
     ;(document.activeElement as HTMLElement)?.blur?.()
 
-    // Only persist custom playlist if it's a filtered subset (< 500 channels)
-    // Avoid serializing 11,000 IDs to history state / sessionStorage on every channel change!
-    const isCustomPlaylist = allChannels.length > 1 && allChannels.length < 500
-    const playlistIds = isCustomPlaylist ? allChannels.map((c) => c.id) : undefined
+    const currentPlaylist = allChannelsRef.current
+    const isCustomPlaylist = currentPlaylist.length > 1 && currentPlaylist.length < 500
+    const playlistIds = isCustomPlaylist ? currentPlaylist.map((c) => c.id) : undefined
     if (isCustomPlaylist) {
       try {
         sessionStorage.setItem('sl_active_playlist', JSON.stringify(playlistIds))
@@ -434,12 +449,16 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
         returnTo,
       },
     })
-  }, [allChannels, returnTo, navigate])
+  }, [returnTo, navigate])
 
   const switchChannelCleanly = useCallback((target: EnrichedChannel) => {
     cancelCountdown()
     switchChannel(target)
   }, [cancelCountdown, switchChannel])
+
+  useEffect(() => {
+    switchChannelCleanlyRef.current = switchChannelCleanly
+  }, [switchChannelCleanly])
 
   // Return to the exact screen entered from and target the last watched channel
   const handleBack = useCallback(() => {
@@ -514,32 +533,18 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
     }
   }, [allChannels, switchChannelCleanly])
 
-  const triggerAutoSkipCountdown = useCallback(() => {
-    const autoSkip = localStorage.getItem('sl_auto_skip') === 'true'
-    if (!autoSkip || !nextChannel || nextChannel.id === channel.id) return
-
-    let remaining = 5
-    setAutoSkipCountdown(remaining)
-    if (countdownTimerRef.current) window.clearInterval(countdownTimerRef.current)
-
-    countdownTimerRef.current = window.setInterval(() => {
-      remaining -= 1
-      if (remaining <= 0) {
-        if (countdownTimerRef.current) window.clearInterval(countdownTimerRef.current)
-        countdownTimerRef.current = null
-        setAutoSkipCountdown(null)
-        markStreamBroken(channel.id)
-        switchChannelCleanly(nextChannel)
-      } else {
-        setAutoSkipCountdown(remaining)
-      }
-    }, 1000)
-  }, [channel.id, nextChannel, switchChannelCleanly])
-
   const failoverToNextAttempt = useCallback(() => {
     if (failoverTimer.current) {
       window.clearTimeout(failoverTimer.current)
       failoverTimer.current = null
+    }
+    if (connectionTimeoutTimer.current) {
+      window.clearTimeout(connectionTimeoutTimer.current)
+      connectionTimeoutTimer.current = null
+    }
+    if (stallTimer.current) {
+      window.clearTimeout(stallTimer.current)
+      stallTimer.current = null
     }
 
     const curIdx = activeStreamIdxRef.current
@@ -547,10 +552,12 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
     const curStream = streams[curIdx]
     const curUrl = curStream?.url
     const currentIsProxied = isProxiedRef.current
+    const currentChannel = channelRef.current
 
     // 1. If currently direct, retry via edge proxy
     if (!currentIsProxied && curUrl && !curUrl.startsWith('/api/proxy')) {
       showToast('Direct stream blocked, retrying via edge proxy…')
+      mediaRecoveryAttempts.current = 0
       isProxiedRef.current = true
       setIsProxied(true)
       setIsBuffering(true)
@@ -564,6 +571,7 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
       const nextStream = streams[nextIdx]
       const nextUseProxy = isMixedContent(nextStream.url)
       showToast(`Stream unresponsive, trying candidate ${nextIdx + 1} of ${streams.length}…`)
+      mediaRecoveryAttempts.current = 0
       activeStreamIdxRef.current = nextIdx
       setActiveStreamIdx(nextIdx)
       isProxiedRef.current = nextUseProxy
@@ -573,13 +581,56 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
       return
     }
 
-    // 3. All stream candidates and proxy attempts exhausted
+    // 3. All stream candidates and proxy attempts exhausted for this channel
     setHasError(true)
     setIsBuffering(false)
     setIsSlowConnecting(false)
-    markStreamBroken(channel.id)
-    triggerAutoSkipCountdown()
-  }, [channel.id, showToast, triggerAutoSkipCountdown])
+    markStreamBroken(currentChannel.id)
+
+    // Check if auto-skip is enabled
+    if (isAutoSkipEnabled()) {
+      const playlist = allChannelsRef.current
+      const curPos = playlist.findIndex((c) => c.id === currentChannel.id)
+      let nextTarget: EnrichedChannel | null = null
+
+      if (playlist.length > 1) {
+        if (curPos >= 0 && curPos < playlist.length - 1) {
+          nextTarget = playlist[curPos + 1]
+        } else if (curPos >= 0) {
+          nextTarget = playlist[0]
+        } else {
+          nextTarget = playlist.find((c) => c.id !== currentChannel.id) || null
+        }
+      }
+
+      if (nextTarget && nextTarget.id !== currentChannel.id) {
+        const autoSkipStart = sessionStorage.getItem('sl_autoskip_start')
+        if (autoSkipStart === nextTarget.id) {
+          // Loop guard: looped all the way back to the starting broken channel
+          sessionStorage.removeItem('sl_autoskip_start')
+          showToast('All channels in this playlist are currently unavailable', 3500)
+          return
+        }
+        if (!autoSkipStart) {
+          sessionStorage.setItem('sl_autoskip_start', currentChannel.id)
+        }
+
+        showToast(`⚠️ ${currentChannel.name} unavailable · Auto-skipping to ${nextTarget.name}…`, 3000)
+        setAutoSkipCountdown(1)
+        if (countdownTimerRef.current) window.clearTimeout(countdownTimerRef.current)
+        countdownTimerRef.current = window.setTimeout(() => {
+          countdownTimerRef.current = null
+          setAutoSkipCountdown(null)
+          switchChannelCleanlyRef.current(nextTarget!)
+        }, 1200)
+        return
+      }
+    }
+  }, [showToast])
+
+  useEffect(() => {
+    failoverToNextAttemptRef.current = failoverToNextAttempt
+  }, [failoverToNextAttempt])
 
   const handleNextStreamCandidate = useCallback(() => {
     cancelCountdown()
@@ -590,6 +641,8 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
     const nextUseProxy = isMixedContent(nextStream.url)
     activeStreamIdxRef.current = nextIdx
     setActiveStreamIdx(nextIdx)
+    mediaRecoveryAttempts.current = 0
+    hasPlayedSuccessfully.current = false
     isProxiedRef.current = nextUseProxy
     setIsProxied(nextUseProxy)
     setHasError(false)
@@ -605,6 +658,8 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
     setIsSlowConnecting(false)
     setActiveStreamIdx(0)
     activeStreamIdxRef.current = 0
+    mediaRecoveryAttempts.current = 0
+    hasPlayedSuccessfully.current = false
     const rawStreams = channelStreamsRef.current
     const firstUrl = rawStreams[0]?.url
     const initProxy = firstUrl ? isMixedContent(firstUrl) : false
@@ -621,30 +676,30 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
     const rawUrl = stream?.url
     if (!rawUrl) {
       window.queueMicrotask(() => {
-        setHasError(true)
-        setIsBuffering(false)
+        failoverToNextAttemptRef.current()
       })
       return
     }
-
-    cancelCountdown()
 
     let isDisposed = false
 
     if (connectionTimeoutTimer.current) window.clearTimeout(connectionTimeoutTimer.current)
     if (failoverTimer.current) window.clearTimeout(failoverTimer.current)
+    if (stallTimer.current) window.clearTimeout(stallTimer.current)
+    hasPlayedSuccessfully.current = false
+    mediaRecoveryAttempts.current = 0
 
     // Slow connection indicator after 4.5s
     connectionTimeoutTimer.current = window.setTimeout(() => {
       if (!isDisposed) setIsSlowConnecting(true)
     }, 4500)
 
-    // Failover watchdog timer: if stream not parsed / buffered in 6.5s, trigger failover
+    // Failover watchdog timer: if stream not parsed / buffered in 7s, trigger failover
     failoverTimer.current = window.setTimeout(() => {
       if (!isDisposed) {
-        failoverToNextAttempt()
+        failoverToNextAttemptRef.current()
       }
-    }, 6500)
+    }, 7000)
 
     const onPlaybackSuccess = () => {
       if (isDisposed) return
@@ -656,6 +711,12 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
         window.clearTimeout(connectionTimeoutTimer.current)
         connectionTimeoutTimer.current = null
       }
+      if (stallTimer.current) {
+        window.clearTimeout(stallTimer.current)
+        stallTimer.current = null
+      }
+      hasPlayedSuccessfully.current = true
+      sessionStorage.removeItem('sl_autoskip_start')
       setIsBuffering(false)
       setIsSlowConnecting(false)
       setHasError(false)
@@ -854,7 +915,6 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
       })
 
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
-        onPlaybackSuccess()
         onSubtitleTracksUpdated()
         onAudioTracksUpdated()
         video.play().catch(() => {
@@ -875,11 +935,16 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
           }
           switch (data.type) {
             case Hls.ErrorTypes.MEDIA_ERROR:
-              hls.recoverMediaError()
+              if (mediaRecoveryAttempts.current < 1) {
+                mediaRecoveryAttempts.current++
+                hls.recoverMediaError()
+              } else {
+                failoverToNextAttemptRef.current()
+              }
               break
             case Hls.ErrorTypes.NETWORK_ERROR:
             default:
-              failoverToNextAttempt()
+              failoverToNextAttemptRef.current()
               break
           }
         }
@@ -889,9 +954,12 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
     } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
       video.src = targetUrl
       video.onloadedmetadata = () => {
-        onPlaybackSuccess()
         syncNativeTextTracks()
         video.play().catch(() => setIsPlaying(false))
+      }
+      video.onplaying = () => {
+        onPlaybackSuccess()
+        setIsPlaying(true)
       }
       video.textTracks?.addEventListener?.('addtrack', syncNativeTextTracks)
       video.textTracks?.addEventListener?.('change', syncNativeTextTracks)
@@ -901,7 +969,7 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
             window.clearTimeout(failoverTimer.current)
             failoverTimer.current = null
           }
-          failoverToNextAttempt()
+          failoverToNextAttemptRef.current()
         }
       }
     }
@@ -919,6 +987,10 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
         window.clearTimeout(connectionTimeoutTimer.current)
         connectionTimeoutTimer.current = null
       }
+      if (stallTimer.current) {
+        window.clearTimeout(stallTimer.current)
+        stallTimer.current = null
+      }
       if (hlsRef.current) {
         hlsRef.current.stopLoad()
         hlsRef.current.detachMedia()
@@ -928,9 +1000,10 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
       video.textTracks?.removeEventListener?.('addtrack', syncNativeTextTracks)
       video.textTracks?.removeEventListener?.('change', syncNativeTextTracks)
       video.onloadedmetadata = null
+      video.onplaying = null
       video.onerror = null
     }
-  }, [channel.id, activeStreamIdx, isProxied, retryNonce, channelStreams, channel.stream, addRecent, failoverToNextAttempt, cancelCountdown])
+  }, [channel.id, activeStreamIdx, isProxied, retryNonce, channelStreams, channel.stream, addRecent])
 
   // Keybindings: attached once with stable ref to guarantee zero dropped key events
   const onKeyRef = useRef<(e: KeyboardEvent) => void>(() => {})
@@ -1053,10 +1126,39 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
         className="player__video"
         autoPlay
         playsInline
-        onWaiting={() => setIsBuffering(true)}
+        onWaiting={() => {
+          setIsBuffering(true)
+          if (hasPlayedSuccessfully.current && !stallTimer.current) {
+            stallTimer.current = window.setTimeout(() => {
+              stallTimer.current = null
+              failoverToNextAttemptRef.current()
+            }, 8000)
+          }
+        }}
         onPlaying={() => {
+          if (stallTimer.current) {
+            window.clearTimeout(stallTimer.current)
+            stallTimer.current = null
+          }
+          if (failoverTimer.current) {
+            window.clearTimeout(failoverTimer.current)
+            failoverTimer.current = null
+          }
+          if (connectionTimeoutTimer.current) {
+            window.clearTimeout(connectionTimeoutTimer.current)
+            connectionTimeoutTimer.current = null
+          }
+          hasPlayedSuccessfully.current = true
+          sessionStorage.removeItem('sl_autoskip_start')
           setIsBuffering(false)
+          setIsSlowConnecting(false)
+          setHasError(false)
           setIsPlaying(true)
+          unmarkStreamBroken(channel.id)
+          const curStream = channelStreams[activeStreamIdx] || channel.stream
+          if (curStream?.url) {
+            cacheWorkingStream(channel.id, curStream.url, isProxied)
+          }
         }}
         onClick={() => setShowHud((v) => !v)}
       />
@@ -1134,7 +1236,7 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
             </p>
             {autoSkipCountdown !== null && (
               <p className="player__error-countdown">
-                Auto-advancing in {autoSkipCountdown}s…{' '}
+                Auto-advancing to next channel…{' '}
                 <button
                   className="player__countdown-cancel"
                   onClick={cancelCountdown}

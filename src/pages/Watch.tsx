@@ -65,8 +65,13 @@ export function Watch() {
         return list
       }
     }
-    return channels.filter((c) => c.stream)
-  }, [playlistIds, channelMap, channels, channel])
+    const fullList = (allChannels && allChannels.length > 0 ? allChannels : channels).filter((c) => c.stream)
+    const baseList = hideBroken ? fullList.filter((c) => !isStreamBroken(c.id) || c.id === channel?.id) : fullList
+    if (channel && !baseList.some((c) => c.id === channel.id)) {
+      return [channel, ...baseList]
+    }
+    return baseList
+  }, [playlistIds, channelMap, channels, allChannels, channel])
 
   if (loading && !channels.length) {
     return (

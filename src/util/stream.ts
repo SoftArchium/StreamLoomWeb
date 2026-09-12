@@ -72,6 +72,27 @@ export function setHideBrokenStreamsEnabled(enabled: boolean) {
   notifyStreamStateChange()
 }
 
+const AUTO_SKIP_KEY = 'sl_auto_skip'
+let _cachedAutoSkip: boolean | null = null
+
+export function isAutoSkipEnabled(): boolean {
+  if (_cachedAutoSkip !== null) return _cachedAutoSkip
+  try {
+    _cachedAutoSkip = localStorage.getItem(AUTO_SKIP_KEY) === 'true'
+  } catch {
+    _cachedAutoSkip = false
+  }
+  return _cachedAutoSkip
+}
+
+export function setAutoSkipEnabled(enabled: boolean) {
+  _cachedAutoSkip = enabled
+  try {
+    localStorage.setItem(AUTO_SKIP_KEY, enabled ? 'true' : 'false')
+  } catch {}
+  notifyStreamStateChange()
+}
+
 export function getBrokenSet(): Set<string> {
   if (_cachedBrokenSet) return _cachedBrokenSet
   const map = getBrokenMap()

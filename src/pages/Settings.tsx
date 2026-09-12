@@ -7,6 +7,8 @@ import {
   clearWorkingStreams,
   isHideBrokenStreamsEnabled,
   setHideBrokenStreamsEnabled,
+  isAutoSkipEnabled,
+  setAutoSkipEnabled,
   onStreamStateChange,
 } from '../util/stream'
 import './Settings.css'
@@ -17,9 +19,7 @@ export function Settings() {
   const [lowLatency, setLowLatency] = useState(() => {
     return localStorage.getItem('sl_low_latency') !== 'false'
   })
-  const [autoSkip, setAutoSkip] = useState(() => {
-    return localStorage.getItem('sl_auto_skip') === 'true'
-  })
+  const [autoSkip, setAutoSkip] = useState(() => isAutoSkipEnabled())
   const [hideBroken, setHideBroken] = useState(() => isHideBrokenStreamsEnabled())
   const [brokenCount, setBrokenCount] = useState(() => getBrokenCount())
   const [clearedNotice, setClearedNotice] = useState(false)
@@ -29,6 +29,7 @@ export function Settings() {
     return onStreamStateChange(() => {
       setBrokenCount(getBrokenCount())
       setHideBroken(isHideBrokenStreamsEnabled())
+      setAutoSkip(isAutoSkipEnabled())
     })
   }, [])
 
@@ -39,7 +40,7 @@ export function Settings() {
 
   const handleAutoSkipChange = (enabled: boolean) => {
     setAutoSkip(enabled)
-    localStorage.setItem('sl_auto_skip', enabled ? 'true' : 'false')
+    setAutoSkipEnabled(enabled)
   }
 
   const handleHideBrokenChange = (enabled: boolean) => {
