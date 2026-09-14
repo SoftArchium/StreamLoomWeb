@@ -11,19 +11,17 @@
     border-color var(--duration-base) var(--ease-out);
   cursor: pointer;
   flex-shrink: 0;
-  will-change: transform;
 }
 
 .channel-card:hover,
 .channel-card:focus,
 .channel-card:focus-visible,
 .channel-card.focused {
-  transform: translateY(-6px) scale(1.04);
-  box-shadow: 0 16px 32px rgba(0, 0, 0, 0.5), 0 0 24px rgba(108, 92, 231, 0.45);
-  border-color: var(--accent-1);
-  outline: 3px solid rgba(108, 92, 231, 0.85);
-  outline-offset: 2px;
+  transform: translateY(-4px) scale(1.02);
+  box-shadow: var(--shadow-card-hover);
+  border-color: var(--border-hover);
   z-index: 10;
+  will-change: transform;
 }
 
 .channel-card:focus .channel-card__play-overlay,
@@ -36,6 +34,13 @@
 .channel-card:focus-visible .channel-card__fav,
 .channel-card.focused .channel-card__fav {
   opacity: 1;
+}
+
+/* Soft focus ring for keyboard/TV navigation - Apple uses a subtle glow, not a hard outline. */
+.channel-card:focus-visible,
+.channel-card.focused {
+  outline: none;
+  box-shadow: var(--shadow-card-hover), 0 0 0 3px var(--accent-glow);
 }
 
 .channel-card:active { transform: scale(0.98); }

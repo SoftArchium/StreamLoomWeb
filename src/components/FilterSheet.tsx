@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react'
+import type { LanguageOption } from './LanguageFilter'
 import './FilterSheet.css'
 
 interface FilterSheetProps {
@@ -13,6 +14,10 @@ interface FilterSheetProps {
   availableCategories: Array<{ id: string; name: string; count: number }>
   selectedCategory: string | null
   onSelectCategory: (id: string | null) => void
+  // Languages
+  availableLanguages: LanguageOption[]
+  selectedLanguage: string | null
+  onSelectLanguage: (code: string | null) => void
   // Quality
   availableQualities: string[]
   selectedQuality: string
@@ -36,6 +41,9 @@ export function FilterSheet({
   availableCategories,
   selectedCategory,
   onSelectCategory,
+  availableLanguages,
+  selectedLanguage,
+  onSelectLanguage,
   availableQualities,
   selectedQuality,
   onSelectQuality,
@@ -51,7 +59,7 @@ export function FilterSheet({
     const q = countrySearch.trim().toLowerCase()
     if (!q) return availableCountries
     return availableCountries.filter(
-      (c) => c.name.toLowerCase().includes(q) || c.code.toLowerCase().includes(q)
+      (c) => c.name.toLowerCase().includes(q) || c.code.toLowerCase().includes(q),
     )
   }, [availableCountries, countrySearch])
 
@@ -186,6 +194,38 @@ export function FilterSheet({
               })}
             </div>
           </div>
+          {/* Languages: single-select, mirroring the desktop picker. Hidden
+              until the sync worker publishes languages. */}
+          {availableLanguages.length > 0 && (
+            <div className="filter-sheet__section">
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span className="filter-sheet__section-title">Language</span>
+                {selectedLanguage && (
+                  <button
+                    onClick={() => onSelectLanguage(null)}
+                    style={{ fontSize: 11, color: 'var(--accent)', fontWeight: 600 }}
+                  >
+                    Clear language
+                  </button>
+                )}
+              </div>
+              <div className="filter-sheet__chips-wrap">
+                {availableLanguages.map((lang) => {
+                  const isActive = selectedLanguage === lang.code
+                  return (
+                    <button
+                      key={lang.code}
+                      className={`filter-chip ${isActive ? 'filter-chip--active' : ''}`}
+                      onClick={() => onSelectLanguage(isActive ? null : lang.code)}
+                    >
+                      <span>🌐 {lang.name}</span>
+                      <span className="filter-chip__count">{lang.count}</span>
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="filter-sheet__footer">

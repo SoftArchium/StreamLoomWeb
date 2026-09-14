@@ -14,6 +14,8 @@ export interface Channel {
   country: string | null
   is_active: boolean
   channel_categories: { category_id: string }[]
+  /** ISO 639-2 codes published by the sync worker. Absent until then. */
+  languages?: string[]
 }
 
 export interface Stream {

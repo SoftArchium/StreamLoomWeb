@@ -62,7 +62,8 @@
   gap: var(--space-md);
   overflow-x: auto;
   padding-bottom: var(--space-sm);
-  scroll-snap-type: x mandatory;
+  overscroll-behavior-x: contain;
+  scroll-snap-type: x proximity;
   -ms-overflow-style: none;
   scrollbar-width: none;
 }

@@ -7,8 +7,10 @@ import { CategoryRow } from '../components/CategoryRow'
 import { SearchBar } from '../components/SearchBar'
 import { ChannelCard } from '../components/ChannelCard'
 import { FilterSheet } from '../components/FilterSheet'
+import { LanguageFilter } from '../components/LanguageFilter'
 import { useKeyboardNav } from '../hooks/useKeyboardNav'
 import { getCountryName, getCountryFlag, formatCountryDisplay } from '../util/country'
+import { getLanguageName } from '../util/language'
 import './Home.css'
 
 const PRIORITY_CATEGORIES = ['music', 'movies', 'cartoons', 'comedy', 'news', 'sports']
@@ -56,10 +58,21 @@ export function Home() {
 
   // Initialize filters from sessionStorage so they are preserved upon returning from player
   const [search, setSearch] = useState(() => sessionStorage.getItem('sl_active_search') || '')
-  const [selectedCategory, setSelectedCategory] = useState<string | null>(() => sessionStorage.getItem('sl_active_cat'))
-  const [selectedCountry, setSelectedCountry] = useState<string | null>(() => sessionStorage.getItem('sl_active_country'))
-  const [selectedQuality, setSelectedQuality] = useState<string>(() => sessionStorage.getItem('sl_active_quality') || 'All Quality')
-  const [showFavOnly, setShowFavOnly] = useState<boolean>(() => sessionStorage.getItem('sl_active_fav') === 'true')
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(() =>
+    sessionStorage.getItem('sl_active_cat'),
+  )
+  const [selectedCountry, setSelectedCountry] = useState<string | null>(() =>
+    sessionStorage.getItem('sl_active_country'),
+  )
+  const [selectedQuality, setSelectedQuality] = useState<string>(
+    () => sessionStorage.getItem('sl_active_quality') || 'All Quality',
+  )
+  const [showFavOnly, setShowFavOnly] = useState<boolean>(
+    () => sessionStorage.getItem('sl_active_fav') === 'true',
+  )
+  const [selectedLanguage, setSelectedLanguage] = useState<string | null>(() =>
+    sessionStorage.getItem('sl_active_lang'),
+  )
   const [userExpandedLimit, setUserExpandedLimit] = useState(0)
   const [isFilterSheetOpen, setIsFilterSheetOpen] = useState(false)
 
@@ -69,7 +82,9 @@ export function Home() {
 
   // Helper to filter channels with optional exclusions (for faceted filtering)
   const filterChannels = useCallback(
-    (exclude: 'country' | 'category' | 'quality' | 'fav' | 'none' = 'none'): EnrichedChannel[] => {
+    (
+      exclude: 'country' | 'category' | 'quality' | 'language' | 'fav' | 'none' = 'none',
+    ): EnrichedChannel[] => {
       let list = playableChannels
       if (showFavOnly && exclude !== 'fav') {
         list = list.filter((ch) => favouriteIds.has(ch.id))
@@ -80,6 +95,9 @@ export function Home() {
       if (selectedCategory && exclude !== 'category') {
         list = list.filter((ch) => ch.categoryIds.includes(selectedCategory))
       }
+      if (selectedLanguage && exclude !== 'language') {
+        list = list.filter((ch) => (ch.languages ?? []).includes(selectedLanguage))
+      }
       if (selectedQuality !== 'All Quality' && exclude !== 'quality') {
         list = list.filter((ch) => matchQuality(ch.stream?.quality, selectedQuality))
       }
@@ -89,12 +107,21 @@ export function Home() {
           (ch) =>
             ch.name.toLowerCase().includes(q) ||
             (ch.country ?? '').toLowerCase().includes(q) ||
-            getCountryName(ch.country).toLowerCase().includes(q)
+            getCountryName(ch.country).toLowerCase().includes(q),
         )
       }
       return list
     },
-    [playableChannels, showFavOnly, favouriteIds, selectedCountry, selectedCategory, selectedQuality, search]
+    [
+      playableChannels,
+      showFavOnly,
+      favouriteIds,
+      selectedCountry,
+      selectedCategory,
+      selectedLanguage,
+      selectedQuality,
+      search,
+    ],
   )
 
   // 1. Faceted Countries: only countries having channels in current subset, with full names & flags
@@ -142,7 +169,21 @@ export function Home() {
       })
   }, [categories, filterChannels])
 
-  // 3. Faceted Qualities: only qualities with channels in current subset
+  // 3. Faceted Languages: only languages present in the current subset
+  const availableLanguages = useMemo(() => {
+    const subset = filterChannels('language')
+    const counts = new Map<string, number>()
+    for (const ch of subset) {
+      for (const code of ch.languages ?? []) {
+        counts.set(code, (counts.get(code) ?? 0) + 1)
+      }
+    }
+    return [...counts.keys()]
+      .map((code) => ({ code, name: getLanguageName(code), count: counts.get(code) ?? 0 }))
+      .sort((a, b) => a.name.localeCompare(b.name))
+  }, [filterChannels])
+
+  // 4. Faceted Qualities: only qualities with channels in current subset
   const availableQualities = useMemo(() => {
     const subset = filterChannels('quality')
     const result = ['All Quality']
@@ -160,12 +201,22 @@ export function Home() {
 
   // Derive effective filter values ensuring they are valid within available faceted options
   const effectiveCountry = useMemo(() => {
-    return selectedCountry && availableCountries.some((c) => c.code === selectedCountry) ? selectedCountry : null
+    return selectedCountry && availableCountries.some((c) => c.code === selectedCountry)
+      ? selectedCountry
+      : null
   }, [selectedCountry, availableCountries])
 
   const effectiveCategory = useMemo(() => {
-    return selectedCategory && availableCategories.some((c) => c.id === selectedCategory) ? selectedCategory : null
+    return selectedCategory && availableCategories.some((c) => c.id === selectedCategory)
+      ? selectedCategory
+      : null
   }, [selectedCategory, availableCategories])
+
+  const effectiveLanguage = useMemo(() => {
+    return selectedLanguage && availableLanguages.some((l) => l.code === selectedLanguage)
+      ? selectedLanguage
+      : null
+  }, [selectedLanguage, availableLanguages])
 
   const effectiveQuality = useMemo(() => {
     return availableQualities.includes(selectedQuality) ? selectedQuality : 'All Quality'
@@ -173,7 +224,7 @@ export function Home() {
 
   const favouriteChannels = useMemo(
     () => playableChannels.filter((ch) => favouriteIds.has(ch.id)),
-    [playableChannels, favouriteIds]
+    [playableChannels, favouriteIds],
   )
 
   const recentChannels = useMemo(
@@ -181,7 +232,7 @@ export function Home() {
       recentIds
         .map((id) => playableChannels.find((ch) => ch.id === id))
         .filter(Boolean) as typeof playableChannels,
-    [recentIds, playableChannels]
+    [recentIds, playableChannels],
   )
 
   const handleWatch = useCallback((channelId: string) => addRecent(channelId), [addRecent])
@@ -203,9 +254,15 @@ export function Home() {
   }, [effectiveCountry])
 
   useEffect(() => {
-    if (effectiveQuality && effectiveQuality !== 'All Quality') sessionStorage.setItem('sl_active_quality', effectiveQuality)
+    if (effectiveQuality && effectiveQuality !== 'All Quality')
+      sessionStorage.setItem('sl_active_quality', effectiveQuality)
     else sessionStorage.removeItem('sl_active_quality')
   }, [effectiveQuality])
+
+  useEffect(() => {
+    if (effectiveLanguage) sessionStorage.setItem('sl_active_lang', effectiveLanguage)
+    else sessionStorage.removeItem('sl_active_lang')
+  }, [effectiveLanguage])
 
   useEffect(() => {
     if (showFavOnly) sessionStorage.setItem('sl_active_fav', 'true')
@@ -216,18 +273,20 @@ export function Home() {
     setSelectedCategory(null)
     setSelectedCountry(null)
     setSelectedQuality('All Quality')
+    setSelectedLanguage(null)
     setShowFavOnly(false)
     setSearch('')
     setUserExpandedLimit(0)
     sessionStorage.removeItem('sl_active_cat')
     sessionStorage.removeItem('sl_active_country')
     sessionStorage.removeItem('sl_active_quality')
+    sessionStorage.removeItem('sl_active_lang')
     sessionStorage.removeItem('sl_active_fav')
     sessionStorage.removeItem('sl_active_search')
   }, [])
 
   // Reset expanded limit when filters change
-  const filterKey = `${selectedCategory}-${selectedCountry}-${selectedQuality}-${showFavOnly}-${search}`
+  const filterKey = `${selectedCategory}-${selectedCountry}-${selectedLanguage}-${selectedQuality}-${showFavOnly}-${search}`
   const [prevFilterKey, setPrevFilterKey] = useState(filterKey)
   if (prevFilterKey !== filterKey) {
     setPrevFilterKey(filterKey)
@@ -255,12 +314,14 @@ export function Home() {
 
   const hasActiveFilter =
     Boolean(effectiveCategory) ||
+    Boolean(effectiveLanguage) ||
     Boolean(effectiveCountry) ||
     effectiveQuality !== 'All Quality' ||
     showFavOnly ||
     Boolean(search.trim())
 
   const activeFilterCount =
+    (effectiveLanguage ? 1 : 0) +
     (effectiveCountry ? 1 : 0) +
     (effectiveCategory ? 1 : 0) +
     (effectiveQuality !== 'All Quality' ? 1 : 0) +
@@ -362,12 +423,20 @@ export function Home() {
                 title="Filter channels by country, category, resolution"
               >
                 <span>🎛️ Filters</span>
-                {activeFilterCount > 0 && (
-                  <span className="home-filter-btn__badge">{activeFilterCount}</span>
-                )}
+                {activeFilterCount > 0 && <span className="home-filter-btn__badge">{activeFilterCount}</span>}
               </button>
             </div>
 
+            {/*
+             * Language filter sits next to the Filters button so it is one
+             * click away on desktop. It renders nothing until the sync
+             * worker publishes languages.
+             */}
+            <LanguageFilter
+              availableLanguages={availableLanguages}
+              selectedLanguage={effectiveLanguage}
+              onSelectLanguage={setSelectedLanguage}
+            />
             {/* Active Filter Chips */}
             {hasActiveFilter && (
               <div className="home-active-chips">
@@ -385,7 +454,9 @@ export function Home() {
                 )}
                 {effectiveCategory && (
                   <button className="active-chip" onClick={() => setSelectedCategory(null)}>
-                    <span>{categories.find((c) => c.id === effectiveCategory)?.name ?? effectiveCategory}</span>
+                    <span>
+                      {categories.find((c) => c.id === effectiveCategory)?.name ?? effectiveCategory}
+                    </span>
                     <span className="active-chip__remove">✕</span>
                   </button>
                 )}
@@ -424,7 +495,9 @@ export function Home() {
                     aria-label="Filter by quality"
                   >
                     {availableQualities.map((r) => (
-                      <option key={r} value={r}>📺 {r}</option>
+                      <option key={r} value={r}>
+                        📺 {r}
+                      </option>
                     ))}
                   </select>
                   <span className="filter-select-arrow">▼</span>
@@ -481,20 +554,15 @@ export function Home() {
                   {search.trim()
                     ? `"${search}" — ${activeGridChannels.length} channels`
                     : selectedCategory
-                    ? `${categories.find((c) => c.id === selectedCategory)?.name ?? 'Category'} — ${activeGridChannels.length} channels`
-                    : selectedCountry
-                    ? `${formatCountryDisplay(selectedCountry)} — ${activeGridChannels.length} channels`
-                    : `${activeGridChannels.length} channels`}
+                      ? `${categories.find((c) => c.id === selectedCategory)?.name ?? 'Category'} — ${activeGridChannels.length} channels`
+                      : selectedCountry
+                        ? `${formatCountryDisplay(selectedCountry)} — ${activeGridChannels.length} channels`
+                        : `${activeGridChannels.length} channels`}
                 </h2>
               </div>
               <div className="home-search-results__grid">
                 {activeGridChannels.slice(0, gridLimit).map((ch) => (
-                  <ChannelCard
-                    key={ch.id}
-                    channel={ch}
-                    playlist={activeGridPlaylist}
-                    onWatch={handleWatch}
-                  />
+                  <ChannelCard key={ch.id} channel={ch} playlist={activeGridPlaylist} onWatch={handleWatch} />
                 ))}
               </div>
 
@@ -550,6 +618,9 @@ export function Home() {
             availableCategories={availableCategories}
             selectedCategory={effectiveCategory}
             onSelectCategory={setSelectedCategory}
+            availableLanguages={availableLanguages}
+            selectedLanguage={effectiveLanguage}
+            onSelectLanguage={setSelectedLanguage}
             availableQualities={availableQualities}
             selectedQuality={effectiveQuality}
             onSelectQuality={setSelectedQuality}

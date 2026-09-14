@@ -46,7 +46,7 @@ export function CategoryRow({ title, channels, nowPlayingMap, onWatch }: Props) 
           observer.disconnect()
         }
       },
-      { rootMargin: REVEAL_ROOT_MARGIN }
+      { rootMargin: REVEAL_ROOT_MARGIN },
     )
     observer.observe(el)
     return () => observer.disconnect()
@@ -64,31 +64,42 @@ export function CategoryRow({ title, channels, nowPlayingMap, onWatch }: Props) 
     rowRef.current?.scrollBy({ left: dir === 'right' ? 560 : -560, behavior: 'smooth' })
   }
 
-  // Mouse wheel horizontal translation on desktop
+  /*
+   * Horizontal wheel translation - only for an explicit sideways gesture.
+   *
+   * A plain vertical wheel used to be cancelled and turned into a horizontal
+   * scroll, which dragged the rail sideways roughly 180px per notch and blocked
+   * the page from scrolling at all. Vertical input is now left alone: the page
+   * scrolls normally and only Shift+wheel or a genuinely horizontal trackpad
+   * delta moves the row.
+   */
   useEffect(() => {
-    const el = rowRef.current
-    if (!el) return
+    const track = rowRef.current
+    if (!track) return
+    // Local const so the closure keeps the non-null narrowing.
+    const el: HTMLDivElement = track
 
     function handleWheel(e: WheelEvent) {
-      if (Math.abs(e.deltaY) > Math.abs(e.deltaX) && Math.abs(e.deltaY) > 5) {
-        // Translate vertical wheel scroll to horizontal track scroll
-        e.preventDefault()
-        el?.scrollBy({ left: e.deltaY * 1.8, behavior: 'auto' })
-        if (el && el.scrollLeft + el.clientWidth >= el.scrollWidth - 300) {
-          ensureMoreVisible()
-        }
-      }
+      const horizontalIntent = e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)
+      if (!horizontalIntent) return
+
+      // Shift+wheel arrives on deltaY; a trackpad swipe already reports deltaX
+      const delta = e.shiftKey && e.deltaX === 0 ? e.deltaY : e.deltaX
+      if (delta === 0) return
+
+      e.preventDefault()
+      el.scrollBy({ left: delta * (e.shiftKey ? 1.8 : 1), behavior: 'auto' })
     }
 
-    el.addEventListener('wheel', handleWheel, { passive: false })
-    return () => el.removeEventListener('wheel', handleWheel)
-  }, [ensureMoreVisible])
+    track.addEventListener('wheel', handleWheel, { passive: false })
+    return () => track.removeEventListener('wheel', handleWheel)
+  }, [])
 
   // Track scroll listener to load more as user swipes/scrolls horizontally
   const handleScroll = useCallback(() => {
-    const el = rowRef.current
-    if (!el) return
-    if (el.scrollLeft + el.clientWidth >= el.scrollWidth - 400) {
+    const track = rowRef.current
+    if (!track) return
+    if (track.scrollLeft + track.clientWidth >= track.scrollWidth - 400) {
       ensureMoreVisible()
     }
   }, [ensureMoreVisible])
@@ -106,16 +117,15 @@ export function CategoryRow({ title, channels, nowPlayingMap, onWatch }: Props) 
           <span className="category-row__count">{channels.length}</span>
         </div>
         <div className="category-row__controls">
-          <button className="category-row__arrow" onClick={() => scroll('left')} aria-label="Scroll left">‹</button>
-          <button className="category-row__arrow" onClick={() => scroll('right')} aria-label="Scroll right">›</button>
+          <button className="category-row__arrow" onClick={() => scroll('left')} aria-label="Scroll left">
+            ‹
+          </button>
+          <button className="category-row__arrow" onClick={() => scroll('right')} aria-label="Scroll right">
+            ›
+          </button>
         </div>
       </div>
-      <div
-        className="category-row__track"
-        ref={rowRef}
-        onScroll={handleScroll}
-        tabIndex={-1}
-      >
+      <div className="category-row__track" ref={rowRef} onScroll={handleScroll} tabIndex={-1}>
         {isRevealed
           ? renderedChannels.map((ch) => (
               <ChannelCard

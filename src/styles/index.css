@@ -35,8 +35,10 @@
   --border: rgba(255, 255, 255, 0.08);
   --border-subtle: rgba(255, 255, 255, 0.08);
   --border-hover: rgba(255, 255, 255, 0.16);
-  --shadow-card: 0 4px 24px rgba(0, 0, 0, 0.75);
-  --shadow-glow: 0 0 32px var(--accent-glow);
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.3), 0 12px 32px rgba(0, 0, 0, 0.45);
+  --shadow-card-hover: 0 2px 6px rgba(0, 0, 0, 0.32), 0 20px 48px rgba(0, 0, 0, 0.5);
+  --shadow-popover: 0 8px 20px rgba(0, 0, 0, 0.28), 0 32px 68px rgba(0, 0, 0, 0.5);
+  --shadow-glow: 0 8px 28px var(--accent-glow);
 
   /* Spacing */
   --space-xs: 4px;
@@ -47,18 +49,22 @@
   --space-2xl: 64px;
 
   /* Radius */
-  --radius-sm: 6px;
-  --radius-md: 12px;
-  --radius-lg: 18px;
-  --radius-xl: 28px;
+  --radius-sm: 8px;
+  --radius-md: 14px;
+  --radius-lg: 20px;
+  --radius-xl: 32px;
   --radius-full: 9999px;
 
+  /* Apple-style vibrancy: one blur/saturation pair shared by every glass layer */
+  --glass-blur: 20px;
+  --glass-saturate: 180%;
+
   /* Animation */
-  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
-  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
-  --duration-fast: 150ms;
-  --duration-base: 260ms;
-  --duration-slow: 420ms;
+  --ease-out: cubic-bezier(0.25, 0.1, 0.25, 1);
+  --ease-spring: cubic-bezier(0.32, 0.72, 0, 1);
+  --duration-fast: 180ms;
+  --duration-base: 300ms;
+  --duration-slow: 460ms;
 
   /* Layout */
   --nav-height: 64px;
@@ -95,7 +101,9 @@
   --border: rgba(0, 0, 0, 0.08);
   --border-subtle: rgba(0, 0, 0, 0.08);
   --border-hover: rgba(0, 0, 0, 0.16);
-  --shadow-card: 0 4px 20px rgba(0, 0, 0, 0.06), 0 1px 3px rgba(0, 0, 0, 0.04);
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.05), 0 12px 32px rgba(0, 0, 0, 0.09);
+  --shadow-card-hover: 0 2px 6px rgba(0, 0, 0, 0.06), 0 20px 48px rgba(0, 0, 0, 0.13);
+  --shadow-popover: 0 8px 20px rgba(0, 0, 0, 0.08), 0 32px 68px rgba(0, 0, 0, 0.16);
   --shadow-glow: 0 0 24px var(--accent-glow);
 }
 
@@ -110,7 +118,8 @@ html {
 }
 
 body {
-  font-family: 'Inter', system-ui, sans-serif;
+  /* Apple devices render true SF; other platforms fall back to Inter. */
+  font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', system-ui, sans-serif;
   background: var(--bg-base);
   color: var(--text-primary);
   min-height: 100dvh;
@@ -137,11 +146,16 @@ ul, ol { list-style: none; }
   white-space: nowrap; border: 0;
 }
 
+/*
+ * Shared vibrancy material. The inset hairline is what makes a surface read as a
+ * raised material rather than a flat tinted panel.
+ */
 .glass {
   background: var(--bg-glass);
-  backdrop-filter: blur(20px) saturate(180%);
-  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
   border: 1px solid var(--border);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
 
 .gradient-text {
@@ -211,5 +225,7 @@ ul, ol { list-style: none; }
   background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.04'/%3E%3C/svg%3E");
   pointer-events: none;
   opacity: 0.4;
-  mix-blend-mode: overlay;
+  /* Neutral: Apple does not use film grain, and a blend layer forces the
+  /* scrolling page behind it to re-composite on every frame. */
+  mix-blend-mode: normal;
 }

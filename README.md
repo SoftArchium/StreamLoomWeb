@@ -45,6 +45,9 @@ reads it back.
 - catalogue:g<N>:epg:ids            -> string[]      (channel ids with schedules)
 - catalogue:g<N>:epg:<channelId>    -> EpgProgram[]  (per-channel schedule)
 
+Each Channel carries languages as ISO 639-2 codes (e.g. [eng, hin]).
+The Language filter hides itself until the sync worker publishes that field.
+
 Every key shares the generation prefix from catalogue:meta, so bumping the
 generation invalidates the catalogue and EPG together. Page counts in meta
 decide how many channels/streams pages are read, and they are fetched

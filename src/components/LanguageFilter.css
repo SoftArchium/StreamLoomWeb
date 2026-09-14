@@ -1,0 +1,166 @@
+/*
+ * Language filter - Apple-style popover picker.
+ *
+ * Built from the shared design tokens so it reads as native to the app: a glass
+ * pill trigger that opens a floating vibrancy panel with a soft shadow, a rounded
+ * search field and list rows carrying live counts plus a check on the active row.
+ */
+
+.lang-filter {
+  position: relative;
+  display: inline-flex;
+  flex-shrink: 0;
+}
+
+.lang-filter__trigger {
+  gap: 6px;
+}
+
+.lang-filter__chevron {
+  font-size: 13px;
+  line-height: 1;
+  opacity: 0.55;
+  transform: translateY(-1px);
+  transition: transform var(--duration-fast) var(--ease-out);
+}
+
+.lang-filter__trigger[aria-expanded="true"] .lang-filter__chevron {
+  transform: translateY(-1px) rotate(90deg);
+}
+
+/* Floating vibrancy panel */
+.lang-filter__popover {
+  position: absolute;
+  top: calc(100% + 10px);
+  left: 0;
+  z-index: 60;
+  width: 288px;
+  max-height: min(60vh, 420px);
+  display: flex;
+  flex-direction: column;
+  padding: 14px;
+  border-radius: var(--radius-xl);
+  background: var(--bg-glass);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-card);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  transform-origin: top left;
+  animation: langFilterIn var(--duration-base) var(--ease-spring) both;
+}
+
+@keyframes langFilterIn {
+  from { opacity: 0; transform: scale(0.94) translateY(-6px); }
+  to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+.lang-filter__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.lang-filter__title {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: -0.2px;
+  color: var(--text-primary);
+}
+
+.lang-filter__clear {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.lang-filter__clear:hover { opacity: 0.75; }
+
+.lang-filter__search {
+  width: 100%;
+  height: 34px;
+  padding: 0 12px;
+  margin-bottom: 8px;
+  border-radius: var(--radius-full);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+}
+
+.lang-filter__search:focus {
+  border-color: var(--accent);
+}
+
+.lang-filter__list {
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.lang-filter__row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 10px;
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  font-size: 13px;
+  text-align: left;
+  transition: background var(--duration-fast) var(--ease-out);
+}
+
+.lang-filter__row:hover { background: var(--bg-card-hover); }
+
+.lang-filter__row--active { background: var(--accent-glow); }
+
+.lang-filter__name {
+  flex: 1;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.lang-filter__count {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.lang-filter__tick {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--accent);
+  animation: langTickIn var(--duration-fast) var(--ease-spring) both;
+}
+
+@keyframes langTickIn {
+  from { opacity: 0; transform: scale(0.6); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+.lang-filter__empty {
+  padding: 14px 10px;
+  font-size: 12px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+@media (max-width: 640px) {
+  .lang-filter__popover {
+    width: min(88vw, 288px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lang-filter__popover,
+  .lang-filter__tick {
+    animation: none;
+  }
+}
