@@ -418,7 +418,19 @@ export default defineConfig({
             },
           },
           {
-            // Cache channel logos
+            // Channel icons from our own CDN. The origin already sends
+            // `Cache-Control: public, max-age=31536000, immutable` and purges the
+            // edge for replaced icons, so the SW mirrors that lifetime instead of
+            // the conservative 24h used for arbitrary third-party images below.
+            urlPattern: /^https:\/\/icons\.softarchium\.com\//i,
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'channel-icon-cdn',
+              expiration: { maxEntries: 1000, maxAgeSeconds: 31536000 },
+            },
+          },
+          {
+            // Cache other remote images (EPG art, third-party assets)
             urlPattern: /\.(png|jpg|jpeg|webp|svg)$/i,
             handler: 'CacheFirst',
             options: {

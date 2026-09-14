@@ -4,6 +4,7 @@ import type { EnrichedChannel } from '../hooks/useChannels'
 import type { EpgProgram } from '../api/supabase'
 import { useFavourites } from '../hooks/useChannels'
 import { formatCountryDisplay } from '../util/country'
+import { LOGO_SIZE, logoUrl, handleLogoError } from '../util/logo'
 import './ChannelCard.css'
 
 interface Props {
@@ -52,6 +53,7 @@ export function ChannelCard({ channel, nowPlaying, size = 'medium', onWatch, pla
   }, [channel.id, toggle])
 
   const countryDisplay = formatCountryDisplay(channel.country)
+  const logoSrc = logoUrl(channel.logo)
 
   return (
     <article
@@ -70,13 +72,15 @@ export function ChannelCard({ channel, nowPlaying, size = 'medium', onWatch, pla
       aria-label={`Play ${channel.name}`}
     >
       <div className="channel-card__thumb">
-        {channel.logo ? (
+        {logoSrc ? (
           <img
-            src={channel.logo}
+            src={logoSrc}
             alt={channel.name}
+            width={LOGO_SIZE}
+            height={LOGO_SIZE}
             loading="lazy"
             decoding="async"
-            onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
+            onError={handleLogoError}
           />
         ) : (
           <span className="channel-card__initials">

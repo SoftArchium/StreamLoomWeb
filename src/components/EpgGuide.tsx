@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import type { EnrichedChannel } from '../hooks/useChannels'
 import type { EpgProgram } from '../api/supabase'
 import { fetchEpg } from '../api/supabase'
+import { LOGO_SIZE, logoUrl, handleLogoError } from '../util/logo'
 import './EpgGuide.css'
 
 interface Props {
@@ -138,6 +139,7 @@ export function EpgGuide({ channels, epgChannelIds }: Props) {
 
         {visibleChannels.map((ch) => {
           const programs = epgMap.get(ch.id) ?? []
+          const logoSrc = logoUrl(ch.logo)
           return (
             <div key={ch.id} className="epg-guide__row">
               {/* Channel sidebar */}
@@ -156,8 +158,16 @@ export function EpgGuide({ channels, epgChannelIds }: Props) {
                 role="button"
                 tabIndex={0}
               >
-                {ch.logo ? (
-                  <img src={ch.logo} alt={ch.name} className="epg-guide__channel-logo" loading="lazy" />
+                {logoSrc ? (
+                  <img
+                    src={logoSrc}
+                    alt={ch.name}
+                    width={LOGO_SIZE}
+                    height={LOGO_SIZE}
+                    decoding="async"
+                    onError={handleLogoError}
+                    className="epg-guide__channel-logo"
+                  />
                 ) : (
                   <span className="epg-guide__channel-initials">
                     {ch.name.slice(0, 2).toUpperCase()}

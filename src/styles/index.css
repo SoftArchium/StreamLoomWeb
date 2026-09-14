@@ -3,7 +3,13 @@
    Dark, glassmorphism, Apple TV-inspired
    ============================================================ */
 
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
+/*
+ * Font loading is intentionally non-blocking: Inter is served via a
+ * print-media stylesheet swap in index.html so first paint renders with
+ * the system font immediately and swaps to Inter once it arrives. An
+ * @import here would block CSS application until the font stylesheet
+ * resolves, delaying first render on every page.
+ */
 
 /* ---------- Design Tokens ---------- */
 :root {

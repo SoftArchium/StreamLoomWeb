@@ -234,7 +234,9 @@
 
 .player__logo {
   height: 40px;
+  width: auto;
   max-width: 120px;
+  aspect-ratio: 1 / 1;
   object-fit: contain;
   filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.6));
   flex-shrink: 0;
@@ -776,6 +778,7 @@
 .player__drawer-logo {
   width: 36px;
   height: 24px;
+  aspect-ratio: 3 / 2;
   object-fit: contain;
   flex-shrink: 0;
 }

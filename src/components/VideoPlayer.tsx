@@ -5,6 +5,7 @@ import type { EnrichedChannel } from '../hooks/useChannels'
 import type { EpgProgram } from '../api/supabase'
 import { useEpg, useFavourites, useRecent } from '../hooks/useChannels'
 import { formatCountryDisplay } from '../util/country'
+import { LOGO_SIZE, logoUrl, handleLogoError } from '../util/logo'
 import {
   getProxyStreamUrl,
   isMixedContent,
@@ -1290,8 +1291,16 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
         </button>
 
         <div className="player__info">
-          {channel.logo && (
-            <img src={channel.logo} alt={channel.name} className="player__logo" />
+          {logoUrl(channel.logo) && (
+            <img
+              src={logoUrl(channel.logo)!}
+              alt={channel.name}
+              width={LOGO_SIZE}
+              height={LOGO_SIZE}
+              decoding="async"
+              onError={handleLogoError}
+              className="player__logo"
+            />
           )}
           <div className="player__info-text">
             <p className="player__name">{channel.name}</p>
@@ -1542,8 +1551,17 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
                   switchChannelCleanly(c)
                 }}
               >
-                {c.logo ? (
-                  <img src={c.logo} alt={c.name} className="player__drawer-logo" loading="lazy" />
+                {logoUrl(c.logo) ? (
+                  <img
+                    src={logoUrl(c.logo)!}
+                    alt={c.name}
+                    width={LOGO_SIZE}
+                    height={LOGO_SIZE}
+                    loading="lazy"
+                    decoding="async"
+                    onError={handleLogoError}
+                    className="player__drawer-logo"
+                  />
                 ) : (
                   <div className="player__drawer-initials">{c.name.slice(0, 2).toUpperCase()}</div>
                 )}

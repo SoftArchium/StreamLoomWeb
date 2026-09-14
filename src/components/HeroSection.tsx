@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import type { EnrichedChannel } from '../hooks/useChannels'
 import { formatCountryDisplay } from '../util/country'
+import { LOGO_SIZE, logoUrl, handleLogoError } from '../util/logo'
 import './HeroSection.css'
 
 interface Props {
@@ -13,7 +14,7 @@ export function HeroSection({ channels }: Props) {
   const [index, setIndex] = useState(0)
 
   // Rotate every 8 seconds across top 5 channels with streams & logos
-  const heroChannels = channels.filter((c) => c.stream && c.logo).slice(0, 5)
+  const heroChannels = channels.filter((c) => c.stream && logoUrl(c.logo)).slice(0, 5)
 
   useEffect(() => {
     if (heroChannels.length <= 1) return
@@ -27,19 +28,38 @@ export function HeroSection({ channels }: Props) {
   if (!featured) return null
 
   const countryDisplay = formatCountryDisplay(featured.country)
+  const logoSrc = logoUrl(featured.logo)!
 
   return (
     <section className="hero noise">
-      {/* Background blur gradient from logo colour */}
-      <div
+      {/*
+        Blurred backdrop rendered as a real <img> rather than a background-image,
+        so it rides the same 128px CDN object (scaled + blurred in CSS) and gets a
+        decoding hint. Above the fold and decorative, hence alt="" and eager load.
+      */}
+      <img
+        src={logoSrc}
+        alt=""
+        aria-hidden="true"
+        width={LOGO_SIZE}
+        height={LOGO_SIZE}
+        decoding="async"
+        onError={handleLogoError}
         className="hero__bg"
-        style={{ '--hero-bg': `url(${featured.logo})` } as React.CSSProperties}
       />
       <div className="hero__overlay" />
 
       <div className="hero__content fade-up" key={featured.id}>
         <div className="hero__logo-wrap">
-          {featured.logo && <img src={featured.logo} alt={featured.name} className="hero__logo" />}
+          <img
+            src={logoSrc}
+            alt={featured.name}
+            width={LOGO_SIZE}
+            height={LOGO_SIZE}
+            decoding="async"
+            onError={handleLogoError}
+            className="hero__logo"
+          />
         </div>
         <h1 className="hero__name">{featured.name}</h1>
         {countryDisplay && (

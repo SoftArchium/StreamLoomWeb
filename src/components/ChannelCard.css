@@ -65,9 +65,18 @@
 .channel-card--medium .channel-card__thumb { height: 96px; }
 .channel-card--large  .channel-card__thumb { height: 124px; }
 
+/*
+ * Logos arrive as a 128px WebP from the channel-icon CDN. The width/height
+ * attributes on the element (see ChannelCard.tsx) reserve a 128x128 box so the
+ * tile never reflows when the image lands; these rules only scale that box
+ * down into the fixed thumb height. No re-encode, no larger variant requested.
+ */
 .channel-card__thumb img {
-  width: 100%;
+  width: auto;
   height: 100%;
+  max-width: 100%;
+  max-height: 100%;
+  aspect-ratio: 1 / 1;
   object-fit: contain;
   padding: 12px;
   transition: transform var(--duration-base) var(--ease-out);
