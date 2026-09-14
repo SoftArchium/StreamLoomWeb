@@ -14,9 +14,43 @@ interface Props {
 const INITIAL_CHUNK = 24
 const CHUNK_SIZE = 24
 
+/** How far ahead of the viewport a row starts mounting its cards. */
+const REVEAL_ROOT_MARGIN = '600px 0px'
+
 export function CategoryRow({ title, channels, nowPlayingMap, onWatch }: Props) {
   const rowRef = useRef<HTMLDivElement>(null)
+  const sectionRef = useRef<HTMLElement>(null)
   const [visibleCount, setVisibleCount] = useState(INITIAL_CHUNK)
+  const [isRevealed, setIsRevealed] = useState(false)
+
+  /*
+   * Mounting every card up front cost rows x 24 image nodes before the first
+   * paint. A row now mounts its cards only as it approaches the viewport; the
+   * placeholders reuse the real card markup so the height, and therefore the
+   * scroll position, stays put when the cards swap in.
+   */
+  useEffect(() => {
+    if (isRevealed) return
+    const el = sectionRef.current
+    if (!el) return
+
+    if (typeof IntersectionObserver === 'undefined') {
+      Promise.resolve().then(() => setIsRevealed(true))
+      return
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          setIsRevealed(true)
+          observer.disconnect()
+        }
+      },
+      { rootMargin: REVEAL_ROOT_MARGIN }
+    )
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [isRevealed])
 
   // Expand visible channels when needed
   const ensureMoreVisible = useCallback(() => {
@@ -62,9 +96,10 @@ export function CategoryRow({ title, channels, nowPlayingMap, onWatch }: Props) 
   if (channels.length === 0) return null
 
   const renderedChannels = channels.slice(0, visibleCount)
+  const ghostCount = Math.min(INITIAL_CHUNK, channels.length)
 
   return (
-    <section className="category-row fade-up">
+    <section className="category-row fade-up" ref={sectionRef}>
       <div className="category-row__header">
         <div className="category-row__title-wrap">
           <h2 className="category-row__title">{title}</h2>
@@ -81,15 +116,29 @@ export function CategoryRow({ title, channels, nowPlayingMap, onWatch }: Props) 
         onScroll={handleScroll}
         tabIndex={-1}
       >
-        {renderedChannels.map((ch) => (
-          <ChannelCard
-            key={ch.id}
-            channel={ch}
-            nowPlaying={nowPlayingMap?.get(ch.id)}
-            onWatch={onWatch}
-            playlist={channels.map((c) => c.id)}
-          />
-        ))}
+        {isRevealed
+          ? renderedChannels.map((ch) => (
+              <ChannelCard
+                key={ch.id}
+                channel={ch}
+                nowPlaying={nowPlayingMap?.get(ch.id)}
+                onWatch={onWatch}
+                playlist={channels.map((c) => c.id)}
+              />
+            ))
+          : Array.from({ length: ghostCount }, (_, i) => (
+              <div
+                key={i}
+                className="channel-card channel-card--medium channel-card--ghost"
+                aria-hidden="true"
+              >
+                <div className="channel-card__thumb" />
+                <div className="channel-card__info">
+                  <span className="skeleton channel-card__ghost-line" style={{ width: '80%' }} />
+                  <span className="skeleton channel-card__ghost-line" style={{ width: '50%' }} />
+                </div>
+              </div>
+            ))}
       </div>
     </section>
   )

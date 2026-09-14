@@ -73,3 +73,32 @@
   scroll-snap-align: start;
   flex-shrink: 0;
 }
+
+/*
+ * Deferred row placeholders. These mirror the real card markup so the thumbnail
+ * and info box keep identical heights, which means the page does not shift when
+ * the actual cards mount. They are inert: no data-card attribute, so keyboard
+ * navigation never lands on one.
+ */
+.channel-card--ghost {
+  pointer-events: none;
+  cursor: default;
+}
+
+.channel-card--ghost:hover,
+.channel-card--ghost:focus,
+.channel-card--ghost.focused {
+  transform: none;
+  box-shadow: none;
+  border-color: var(--border);
+  outline: none;
+}
+
+.channel-card--ghost .channel-card__ghost-line {
+  display: block;
+  height: 16px;
+}
+
+.channel-card--ghost .channel-card__ghost-line + .channel-card__ghost-line {
+  height: 13px;
+}

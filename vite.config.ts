@@ -407,7 +407,21 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
+        // The media engine (vendor-hls) is code-split behind the /watch route,
+        // so keep it out of install-time precache: a first visit should not
+        // download ~575 kB it may never use. The runtime rule below caches it
+        // the first time playback actually needs it.
+        globIgnores: ['**/vendor-hls-*.js'],
         runtimeCaching: [
+          {
+            // Media engine chunk, fetched only when the player route opens.
+            urlPattern: /vendor-hls-[A-Za-z0-9_-]+\.js/i,
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'media-engine',
+              expiration: { maxEntries: 5, maxAgeSeconds: 31536000 },
+            },
+          },
           {
             // Cache Supabase API responses for 5 minutes
             urlPattern: /^https:\/\/.*\.supabase\.co\/rest\/v1\//i,

@@ -66,17 +66,16 @@
 .channel-card--large  .channel-card__thumb { height: 124px; }
 
 /*
- * Logos arrive as a 128px WebP from the channel-icon CDN. The width/height
- * attributes on the element (see ChannelCard.tsx) reserve a 128x128 box so the
- * tile never reflows when the image lands; these rules only scale that box
- * down into the fixed thumb height. No re-encode, no larger variant requested.
+ * Icons are not square: the CDN serves 128px on the long edge, which is 128x128
+ * for some channels but as narrow as 128x51 for others. The width/height
+ * attributes on the element (see ChannelCard.tsx) only declare the intrinsic
+ * ratio so space is reserved before bytes land; forcing a square display box
+ * would letterbox wide logos and render them tiny and off-centre. The fixed
+ * thumb height reserves the layout and object-fit fits every ratio correctly.
  */
 .channel-card__thumb img {
-  width: auto;
+  width: 100%;
   height: 100%;
-  max-width: 100%;
-  max-height: 100%;
-  aspect-ratio: 1 / 1;
   object-fit: contain;
   padding: 12px;
   transition: transform var(--duration-base) var(--ease-out);
