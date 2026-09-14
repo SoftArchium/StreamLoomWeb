@@ -1,7 +1,7 @@
 import { useRef, useState, useCallback, useEffect } from 'react'
 import { ChannelCard } from './ChannelCard'
 import type { EnrichedChannel } from '../hooks/useChannels'
-import type { EpgProgram } from '../api/supabase'
+import type { EpgProgram } from '../api/types'
 import './CategoryRow.css'
 
 interface Props {

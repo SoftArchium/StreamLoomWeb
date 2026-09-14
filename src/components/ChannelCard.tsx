@@ -1,7 +1,7 @@
 import { useCallback } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import type { EnrichedChannel } from '../hooks/useChannels'
-import type { EpgProgram } from '../api/supabase'
+import type { EpgProgram } from '../api/types'
 import { useFavourites } from '../hooks/useChannels'
 import { formatCountryDisplay } from '../util/country'
 import { LOGO_SIZE, logoUrl, handleLogoError } from '../util/logo'

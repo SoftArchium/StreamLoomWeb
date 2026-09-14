@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import type { EnrichedChannel } from '../hooks/useChannels'
-import type { EpgProgram } from '../api/supabase'
-import { fetchEpg } from '../api/supabase'
+import type { EpgProgram } from '../api/types'
+import { fetchEpgFromRedis } from '../api/redis'
 import { LOGO_SIZE, logoUrl, handleLogoError } from '../util/logo'
 import './EpgGuide.css'
 
@@ -53,7 +53,7 @@ export function EpgGuide({ channels, epgChannelIds }: Props) {
         const results = await Promise.all(
           batch.map(async (ch) => {
             try {
-              const data = await fetchEpg(ch.id)
+              const data = await fetchEpgFromRedis(ch.id)
               return { id: ch.id, data }
             } catch {
               return { id: ch.id, data: [] }

@@ -23,7 +23,7 @@ StreamLoomWeb/
 ├── src/
 │   ├── api/
 │   │   ├── redis.ts           # Upstash Redis REST edge catalogue client (ADR-0015)
-│   │   └── supabase.ts        # Supabase PostgREST client (channels, streams, EPG)
+│   │   └── types.ts           # Catalogue + EPG payload types (erased at build)
 │   ├── components/
 │   │   ├── ChannelCard.tsx    # Channel grid item with badges and fallback logo
 │   │   ├── HeroSection.tsx    # Featured channel showcase with play CTA

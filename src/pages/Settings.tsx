@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useChannels } from '../hooks/useChannels'
+import { useChannels, clearCatalogueCache } from '../hooks/useChannels'
 import { useTheme } from '../hooks/useTheme'
 import {
   getBrokenCount,
@@ -59,6 +59,8 @@ export function Settings() {
 
   const handleClearCache = () => {
     try {
+      // The catalogue lives in IndexedDB now, so clear that too.
+      clearCatalogueCache()
       localStorage.removeItem('sl_catalogue_v5')
       localStorage.removeItem('sl_catalogue_v4')
       localStorage.removeItem('sl_catalogue_v3')

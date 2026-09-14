@@ -1,22 +1,29 @@
 import { useEffect, useState, useCallback } from 'react'
-import {
-  fetchChannels,
-  fetchStreams,
-  fetchCategories,
-  fetchEpgChannelIds,
-  fetchEpg,
-} from '../api/supabase'
-import type { Channel, Stream, Category, EpgProgram } from '../api/supabase'
+import type { Category, EnrichedChannel, EpgProgram } from '../api/types'
 import {
   fetchCatalogueFromRedis,
+  fetchEpgFromRedis,
+  fetchEpgIdsFromRedis,
   isUpstashConfigured,
 } from '../api/redis'
+import { enrichChannels } from '../util/enrich'
+import {
+  clearStoredCatalogue,
+  readStoredCatalogue,
+  writeStoredCatalogue,
+} from '../util/catalogueStore'
+import type {
+  CatalogueWorkerRequest,
+  CatalogueWorkerResponse,
+} from '../workers/catalogue.worker'
+import {
+  getBrokenSet,
+  getWorkingMapSnapshot,
+  isHideBrokenStreamsEnabled,
+  onStreamStateChange,
+} from '../util/stream'
 
-export interface EnrichedChannel extends Channel {
-  stream: Stream | undefined
-  streams: Stream[]
-  categoryIds: string[]
-}
+export type { EnrichedChannel }
 
 interface UseChannelsResult {
   channels: EnrichedChannel[]
@@ -27,44 +34,13 @@ interface UseChannelsResult {
   error: string | null
   refresh: () => void
   /** Where catalogue data was last loaded from */
-  source: 'redis' | 'supabase' | 'cache' | null
+  source: 'redis' | 'cache' | null
 }
 
-// ---- LocalStorage catalogue cache ----
-const CACHE_KEY = 'sl_catalogue_v5'
-const CACHE_TTL_MS = 60 * 60 * 1000 // 1 hour
-
-// Purge legacy v4 cache if present
-try {
-  localStorage.removeItem('sl_catalogue_v4')
-} catch {}
-
-interface CacheEntry {
+interface CatalogueLoad {
   channels: EnrichedChannel[]
   categories: Category[]
   epgIds: string[]
-  source: 'redis' | 'supabase'
-  ts: number
-}
-
-function readCache(): CacheEntry | null {
-  try {
-    const raw = localStorage.getItem(CACHE_KEY)
-    if (!raw) return null
-    const entry: CacheEntry = JSON.parse(raw)
-    if (Date.now() - entry.ts > CACHE_TTL_MS) return null
-    return entry
-  } catch {
-    return null
-  }
-}
-
-function writeCache(data: Omit<CacheEntry, 'ts'>) {
-  try {
-    localStorage.setItem(CACHE_KEY, JSON.stringify({ ...data, ts: Date.now() }))
-  } catch {
-    /* storage quota exceeded — ignore */
-  }
 }
 
 // Module-level in-memory state (shared across all hook instances)
@@ -73,144 +49,140 @@ let _categories: Category[] | null = null
 let _epgIds: Set<string> | null = null
 let _loading = true
 let _error: string | null = null
-let _source: 'redis' | 'supabase' | 'cache' | null = null
+let _source: 'redis' | 'cache' | null = null
 const _listeners = new Set<() => void>()
 
 function notify() {
   _listeners.forEach((fn) => fn())
 }
 
-import {
-  getCachedWorkingStream,
-  getBrokenSet,
-  isHideBrokenStreamsEnabled,
-  onStreamStateChange,
-} from '../util/stream'
-
 onStreamStateChange(() => {
   notify()
 })
 
-function enrichChannels(
-  rawChannels: { id: string; name: string; logo: string | null; country: string | null; is_active: boolean; channel_categories: { category_id: string }[] }[],
-  streams: { channel_id: string | null; url: string; quality: string | null; status: string | null }[]
-): EnrichedChannel[] {
-  const streamMap = new Map<string, Stream[]>()
-  for (const s of streams) {
-    if (!s.channel_id) continue
-    let list = streamMap.get(s.channel_id)
-    if (!list) {
-      list = []
-      streamMap.set(s.channel_id, list)
-    }
-    list.push(s as Stream)
-  }
+const WORKER_TIMEOUT_MS = 25_000
 
-  return rawChannels.map((ch) => {
-    const channelStreams = streamMap.get(ch.id) || []
-    const cachedWorking = getCachedWorkingStream(ch.id)
-    const workingCandidate = cachedWorking
-      ? channelStreams.find((s) => s.url === cachedWorking.url)
-      : null
-
-    let orderedStreams = channelStreams
-    if (workingCandidate) {
-      orderedStreams = [
-        workingCandidate,
-        ...channelStreams.filter((s) => s.url !== workingCandidate.url),
-      ]
+/**
+ * Runs the load inside a Web Worker so Redis page parsing and the ~40k-row join
+ * stay off the main thread. Resolves undefined when no worker can be used, which
+ * tells the caller to fall back to the main thread.
+ */
+function loadInWorker(): Promise<CatalogueLoad | null | undefined> {
+  return new Promise((resolve) => {
+    if (typeof Worker === 'undefined') {
+      resolve(undefined)
+      return
     }
 
-    // Prioritize cached working stream, then active HTTPS, then HTTPS, then active HTTP
-    const bestStream =
-      workingCandidate ||
-      orderedStreams.find((s) => s.url.startsWith('https://') && s.status === 'active') ||
-      orderedStreams.find((s) => s.url.startsWith('https://')) ||
-      orderedStreams.find((s) => s.url.startsWith('http://') && s.status === 'active') ||
-      orderedStreams[0]
-
-    if (bestStream && orderedStreams.length > 1) {
-      orderedStreams = [
-        bestStream,
-        ...orderedStreams.filter((s) => s.url !== bestStream.url),
-      ]
+    let worker: Worker
+    try {
+      worker = new Worker(new URL('../workers/catalogue.worker.ts', import.meta.url), {
+        type: 'module',
+      })
+    } catch {
+      resolve(undefined)
+      return
     }
 
-    return {
-      ...(ch as Channel),
-      stream: bestStream,
-      streams: orderedStreams,
-      categoryIds: ch.channel_categories.map((c) => c.category_id),
+    let settled = false
+    const finish = (value: CatalogueLoad | null | undefined) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      worker.terminate()
+      resolve(value)
     }
+
+    const timer = setTimeout(() => finish(undefined), WORKER_TIMEOUT_MS)
+
+    worker.onmessage = (event: MessageEvent<CatalogueWorkerResponse>) => {
+      const data = event.data
+      if (data && data.ok) {
+        finish({ channels: data.channels, categories: data.categories, epgIds: data.epgIds })
+      } else {
+        finish(null)
+      }
+    }
+    worker.onerror = () => finish(undefined)
+
+    const request: CatalogueWorkerRequest = { working: getWorkingMapSnapshot() }
+    worker.postMessage(request)
   })
 }
 
+/** Fallback for environments without workers: identical work, main thread. */
+async function loadOnMainThread(): Promise<CatalogueLoad | null> {
+  const catalogue = await fetchCatalogueFromRedis()
+  if (!catalogue) return null
+  const epgIds = await fetchEpgIdsFromRedis()
+  return {
+    channels: enrichChannels(catalogue.channels, catalogue.streams, getWorkingMapSnapshot()),
+    categories: catalogue.categories,
+    epgIds,
+  }
+}
+
+async function loadCatalogue(): Promise<CatalogueLoad | null> {
+  const fromWorker = await loadInWorker()
+  if (fromWorker !== undefined) return fromWorker
+  return loadOnMainThread()
+}
+
+/** Applies a freshly loaded catalogue to the shared module state. */
+function applyLoad(load: CatalogueLoad, source: 'redis' | 'cache') {
+  _channels = load.channels
+  _categories = load.categories
+  _epgIds = new Set(load.epgIds)
+  _source = source
+  _loading = false
+  _error = null
+}
+
 async function loadData(force = false) {
-  // Serve from memory
   if (!force && _channels) return
 
-  // Serve from localStorage cache (instant)
+  // Instant path: IndexedDB first, then refresh from Redis in the background.
   if (!force) {
-    const cached = readCache()
-    if (cached) {
-      _channels = cached.channels
-      _categories = cached.categories
-      _epgIds = new Set(cached.epgIds)
+    const stored = await readStoredCatalogue()
+    if (stored) {
+      _channels = stored.channels
+      _categories = stored.categories
+      _epgIds = new Set(stored.epgIds)
       _source = 'cache'
       _loading = false
+      _error = null
       notify()
-      // Refresh in background silently
       loadData(true).catch(() => {})
       return
     }
   }
 
-  _loading = true
-  notify()
+  // Only surface the spinner when there is nothing on screen already.
+  if (!_channels || _channels.length === 0) {
+    _loading = true
+    notify()
+  }
 
   try {
-    // --- Tier 1: Try Upstash Redis first (same strategy as mobile ADR-0015) ---
-    const redisResult = await fetchCatalogueFromRedis()
+    const load = await loadCatalogue()
 
-    if (redisResult) {
-      // Redis hit — build enriched channels
-      const enriched = enrichChannels(redisResult.channels, redisResult.streams)
-      const cats = redisResult.categories as Category[]
-
-      // EPG IDs still come from Supabase Storage (not in Redis)
-      const epgIds = await fetchEpgChannelIds()
-
-      _channels = enriched
-      _categories = cats
-      _epgIds = epgIds
-      _source = 'redis'
+    if (!load) {
       _loading = false
-      _error = null
-
-      writeCache({ channels: enriched, categories: cats, epgIds: [...epgIds], source: 'redis' })
+      _error = isUpstashConfigured
+        ? 'Catalogue unavailable — the sync worker has not published it to Redis yet.'
+        : 'Upstash Redis is not configured.'
       notify()
       return
     }
 
-    // --- Tier 2: Fall through to Supabase PostgREST ---
-    const [rawChannels, streams, cats, epgIds] = await Promise.all([
-      fetchChannels(),
-      fetchStreams(),
-      fetchCategories(),
-      fetchEpgChannelIds(),
-    ])
-
-    const enriched = enrichChannels(rawChannels, streams)
-
-    _channels = enriched
-    _categories = cats
-    _epgIds = epgIds
-    _source = 'supabase'
-    _loading = false
-    _error = null
-
-    writeCache({ channels: enriched, categories: cats, epgIds: [...epgIds], source: 'supabase' })
+    applyLoad(load, 'redis')
     notify()
+
+    writeStoredCatalogue({
+      channels: load.channels,
+      categories: load.categories,
+      epgIds: load.epgIds,
+    }).catch(() => {})
   } catch (e) {
     _error = (e as Error).message
     _loading = false
@@ -218,7 +190,7 @@ async function loadData(force = false) {
   }
 }
 
-// Kick off loading immediately when the module is first imported
+// Kick off loading as soon as this module is first imported
 loadData()
 
 export function useChannels(): UseChannelsResult {
@@ -251,7 +223,20 @@ export function useChannels(): UseChannelsResult {
   }
 }
 
-// ---- EPG ----
+/** Drops the persisted and in-memory catalogue. Used by Settings. */
+export async function clearCatalogueCache() {
+  await clearStoredCatalogue()
+  _channels = null
+  _categories = null
+  _epgIds = null
+  _source = null
+}
+
+// ---- Debug helpers ----
+export function getDataSource() { return _source }
+export function getUpstashConfigured() { return isUpstashConfigured }
+
+// ---- EPG (read from Redis on demand, one key per channel) ----
 const _epgCache = new Map<string, EpgProgram[]>()
 
 export function useEpg(channelId: string | null) {
@@ -267,7 +252,7 @@ export function useEpg(channelId: string | null) {
     Promise.resolve().then(() => {
       if (!cancelled) setLoading(true)
     })
-    fetchEpg(channelId)
+    fetchEpgFromRedis(channelId)
       .then((data) => {
         if (!cancelled) {
           _epgCache.set(channelId, data)
@@ -372,7 +357,3 @@ export function useRecent() {
 
   return { recentIds: _recent, addRecent }
 }
-
-// ---- Debug helper ----
-export function getDataSource() { return _source }
-export function getUpstashConfigured() { return isUpstashConfigured }

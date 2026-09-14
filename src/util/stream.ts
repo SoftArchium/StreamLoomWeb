@@ -173,6 +173,17 @@ function getWorkingMap(): Record<string, WorkingStreamRecord> {
   }
 }
 
+/**
+ * Snapshot of the working-stream cache, resolved once per call.
+ *
+ * enrichChannels used to call getCachedWorkingStream() once per channel, so the
+ * whole localStorage map was re-read and re-parsed on every one of ~40k rows.
+ * Callers now take a single snapshot and look up from it.
+ */
+export function getWorkingMapSnapshot(): Record<string, WorkingStreamRecord> {
+  return getWorkingMap()
+}
+
 export function getCachedWorkingStream(channelId: string): { url: string; useProxy: boolean } | null {
   const map = getWorkingMap()
   const rec = map[channelId]

@@ -26,19 +26,36 @@
 - **React 19** + **TypeScript** + **Vite 8**
 - **HLS.js** for adaptive live streaming
 - **Cloudflare Pages** for global Anycast edge delivery
-- **Upstash Redis** read-only edge cache (ADR-0015) with Supabase PostgREST fallback
-- **Supabase** — shared backend with the mobile app (channels, streams, EPG, categories)
+- **Upstash Redis** read-only edge cache (ADR-0015) — the browser only data source
+- **Supabase** — backend source of truth, synced into Redis (never called from the browser)
 - **vite-plugin-pwa** + Workbox for service worker & installability
 
 ---
 
+## Redis data contract
+
+The browser reads only from Upstash Redis (ADR-0015). Supabase is never
+called from the client; the sync worker publishes into Redis and the app
+reads it back.
+
+- catalogue:meta                    -> { generation, version, pages }
+- catalogue:g<N>:channels:page:<i>  -> Channel[]
+- catalogue:g<N>:streams:page:<i>   -> Stream[]
+- catalogue:g<N>:categories         -> Category[]
+- catalogue:g<N>:epg:ids            -> string[]      (channel ids with schedules)
+- catalogue:g<N>:epg:<channelId>    -> EpgProgram[]  (per-channel schedule)
+
+Every key shares the generation prefix from catalogue:meta, so bumping the
+generation invalidates the catalogue and EPG together. Page counts in meta
+decide how many channels/streams pages are read, and they are fetched
+concurrently.
+
 ## Environment Variables
+
 
 Copy `.env.example` to `.env`:
 
 ```bash
-VITE_SUPABASE_URL=https://xgookvlbhkchkktzrkau.supabase.co
-VITE_SUPABASE_ANON_KEY=your_anon_key
 VITE_UPSTASH_REDIS_REST_URL=https://your-upstash-endpoint.upstash.io
 VITE_UPSTASH_REDIS_REST_READONLY_TOKEN=your_upstash_readonly_token
 ```

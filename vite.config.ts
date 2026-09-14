@@ -383,7 +383,7 @@ function streamProxyPlugin(): Plugin {
 }
 
 export default defineConfig({
-  envPrefix: ['VITE_', 'SUPABASE_', 'UPSTASH_'],
+  envPrefix: ['VITE_', 'UPSTASH_'],
   plugins: [
     react(),
     streamProxyPlugin(),
@@ -423,15 +423,6 @@ export default defineConfig({
             },
           },
           {
-            // Cache Supabase API responses for 5 minutes
-            urlPattern: /^https:\/\/.*\.supabase\.co\/rest\/v1\//i,
-            handler: 'NetworkFirst',
-            options: {
-              cacheName: 'supabase-api-cache',
-              expiration: { maxEntries: 50, maxAgeSeconds: 300 },
-            },
-          },
-          {
             // Channel icons from our own CDN. The origin already sends
             // `Cache-Control: public, max-age=31536000, immutable` and purges the
             // edge for replaced icons, so the SW mirrors that lifetime instead of
@@ -464,7 +455,6 @@ export default defineConfig({
       output: {
         manualChunks(id) {
           if (id.includes('node_modules/hls.js')) return 'vendor-hls'
-          if (id.includes('node_modules/@supabase')) return 'vendor-supabase'
           if (
             id.includes('node_modules/react') ||
             id.includes('node_modules/react-dom') ||

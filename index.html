@@ -8,20 +8,24 @@
   <!-- Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <!-- Load Inter without blocking first paint: fetch the stylesheet early via
+       preload, then apply it asynchronously through the print-media swap so
+       content renders in the system font immediately and upgrades to Inter
+       when it arrives (font-display: swap). No page waits on the font CSS. -->
   <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" />
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" media="print" onload="this.media='all'" />
   <noscript>
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" />
   </noscript>
 
-  <!-- Channel icon CDN (icons.softarchium.com) — start DNS + TLS before the first tile -->
+  <!-- Channel icon CDN (icons.softarchium.com) - start DNS + TLS before the first tile -->
   <link rel="preconnect" href="https://icons.softarchium.com" crossorigin />
   <link rel="dns-prefetch" href="https://icons.softarchium.com" />
 
   <!-- SEO -->
   <title>StreamLoom Web - Live TV Everywhere</title>
   <meta name="description"
-    content="Watch thousands of live TV channels from around the world. Free, no registration. StreamLoom Web is a Progressive Web App — install it on any device." />
+    content="Watch thousands of live TV channels from around the world. Free, no registration. StreamLoom Web is a Progressive Web App - install it on any device." />
   <meta name="theme-color" content="#0a0a0f" />
 
   <script>
@@ -46,16 +50,70 @@
   <meta name="apple-mobile-web-app-title" content="StreamLoom" />
 
   <!-- Open Graph -->
-  <meta property="og:title" content="StreamLoom Web — Live TV Everywhere" />
+  <meta property="og:title" content="StreamLoom Web - Live TV Everywhere" />
   <meta property="og:description"
     content="Thousands of live TV channels, EPG guide, favourites, and no sign-up required." />
   <meta property="og:type" content="website" />
 
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+
+  <!-- Boot shell: paints the nav + rails from the HTML alone, before any JS or
+       the app stylesheet arrives. React replaces it on first commit. -->
+  <style>
+    :root{--sl-bg:#0c0d11;--sl-surface:#13151b;--sl-card:#181b22;--sl-text:#f3f4f6;--sl-accent:#7c6ef7}
+    [data-theme='light']{--sl-bg:#f4f4f7;--sl-surface:#ffffff;--sl-card:#ffffff;--sl-text:#12131a;--sl-accent:#6052dd}
+    html,body{margin:0;background:var(--sl-bg);color:var(--sl-text);font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif}
+    #root{min-height:100dvh}
+    .sl-boot{min-height:100dvh;padding:0 24px;box-sizing:border-box}
+    .sl-boot__nav{display:flex;align-items:center;gap:20px;height:64px}
+    .sl-boot__brand{font-weight:800;font-size:20px;letter-spacing:-0.5px;color:var(--sl-accent);white-space:nowrap}
+    .sl-boot__search{flex:1;max-width:520px;height:38px;border-radius:999px;background:var(--sl-card)}
+    .sl-boot__links{display:flex;gap:16px;margin-left:auto}
+    .sl-boot__links i{display:block;width:62px;height:12px;border-radius:6px;background:var(--sl-card)}
+    .sl-boot__hero{height:clamp(320px,42vh,560px);border-radius:28px;background:var(--sl-surface);margin-bottom:36px}
+    .sl-boot__row{margin-bottom:36px}
+    .sl-boot__rowtitle{width:180px;height:22px;border-radius:6px;background:var(--sl-card);margin-bottom:16px}
+    .sl-boot__cards{display:flex;gap:16px;overflow:hidden}
+    .sl-boot__card{flex:0 0 auto;width:170px;height:140px;border-radius:18px;background:var(--sl-card)}
+    @media (max-width:640px){.sl-boot{padding:0 16px}.sl-boot__card{width:130px;height:110px}.sl-boot__links{display:none}}
+  </style>
 </head>
 
 <body>
-  <div id="root"></div>
+  <div id="root">
+    <div class="sl-boot">
+      <header class="sl-boot__nav">
+        <span class="sl-boot__brand">▶ StreamLoom</span>
+        <span class="sl-boot__search"></span>
+        <span class="sl-boot__links"><i></i><i></i><i></i></span>
+      </header>
+      <main>
+        <div class="sl-boot__hero"></div>
+        <div class="sl-boot__row">
+          <div class="sl-boot__rowtitle"></div>
+          <div class="sl-boot__cards">
+            <div class="sl-boot__card"></div>
+            <div class="sl-boot__card"></div>
+            <div class="sl-boot__card"></div>
+            <div class="sl-boot__card"></div>
+            <div class="sl-boot__card"></div>
+            <div class="sl-boot__card"></div>
+          </div>
+        </div>
+        <div class="sl-boot__row">
+          <div class="sl-boot__rowtitle"></div>
+          <div class="sl-boot__cards">
+            <div class="sl-boot__card"></div>
+            <div class="sl-boot__card"></div>
+            <div class="sl-boot__card"></div>
+            <div class="sl-boot__card"></div>
+            <div class="sl-boot__card"></div>
+            <div class="sl-boot__card"></div>
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
   <script type="module" src="/src/main.tsx"></script>
 </body>
 

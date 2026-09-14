@@ -37,7 +37,7 @@ StreamLoom Web is the browser-native Progressive Web App (PWA) companion to the 
 - **Routing**: `react-router-dom` v7
 - **Video Engine**: `hls.js` v1.7.x (adaptive bitrate streaming, low-latency live synchronization)
 - **Backend & Data**:
-  - `@supabase/supabase-js` v2 (PostgreSQL PostgREST: channels, streams, EPG, categories)
+  - `@supabase/supabase-js` v2 (backend only - never called from the browser)
   - Upstash Redis REST API (read-only edge catalogue caching via ADR-0015)
 - **PWA & Offline**: `vite-plugin-pwa`, Workbox
 - **Linter**: `oxlint` (Rust-based ultra-fast linter)

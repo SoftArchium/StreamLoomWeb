@@ -1,17 +1,23 @@
 /**
  * Upstash Redis REST client — read-only.
  *
- * Mirrors the mobile app's UpstashCacheClient (ADR-0015):
- * - GET /get/<key> over HTTPS — one round-trip, no TCP pool
- * - Every failure returns null — the caller falls through to Supabase PostgREST
- * - Read-only token only — no write path is possible
+ * This is the client's only data source. Supabase is never called from the
+ * browser: the sync worker publishes the catalogue and EPG into Redis and the
+ * app reads it back over the ADR-0015 scheme below.
  *
  * Key scheme (matches sync worker / mobile app):
- *   catalogue:meta                              → { generation, version, pages{channels,streams} }
- *   catalogue:g<N>:channels:page:<i>            → Channel[]
- *   catalogue:g<N>:streams:page:<i>             → Stream[]
- *   catalogue:g<N>:categories                   → Category[]
+ *   catalogue:meta                    -> { generation, version, pages }
+ *   catalogue:g<N>:channels:page:<i>  -> Channel[]
+ *   catalogue:g<N>:streams:page:<i>   -> Stream[]
+ *   catalogue:g<N>:categories         -> Category[]
+ *   catalogue:g<N>:epg:ids            -> string[]      (channels with schedules)
+ *   catalogue:g<N>:epg:<channelId>    -> EpgProgram[]  (per-channel, on demand)
+ *
+ * Every read is one HTTPS GET. A miss returns null/empty so the caller can show
+ * a retry state instead of silently falling back to another origin.
  */
+
+import type { Category, Channel, EpgProgram, Stream } from './types'
 
 const UPSTASH_URL = (
   import.meta.env.VITE_UPSTASH_REDIS_REST_URL ||
@@ -33,7 +39,7 @@ export const isUpstashConfigured = Boolean(UPSTASH_URL && UPSTASH_TOKEN)
 /** Maximum allowed response size (2 MB) — same ceiling as the mobile app. */
 const MAX_BYTES = 2 * 1024 * 1024
 
-/** Budget in ms for the entire catalogue read from Redis before we fall through. */
+/** Budget in ms for the whole catalogue read before giving up. */
 export const CACHE_BUDGET_MS = 20_000
 
 /**
@@ -43,9 +49,9 @@ export const CACHE_BUDGET_MS = 20_000
 export async function redisGet(key: string): Promise<string | null> {
   if (!isUpstashConfigured) return null
   try {
-    const url = `${UPSTASH_URL!.replace(/\/$/, '')}/get/${encodeURIComponent(key)}`
+    const url = UPSTASH_URL!.replace(/\/$/, '') + '/get/' + encodeURIComponent(key)
     const res = await fetch(url, {
-      headers: { Authorization: `Bearer ${UPSTASH_TOKEN!}` },
+      headers: { Authorization: 'Bearer ' + UPSTASH_TOKEN! },
     })
     if (!res.ok) return null
 
@@ -62,7 +68,7 @@ export async function redisGet(key: string): Promise<string | null> {
 
 // ---- Catalogue meta ----
 
-/** Must match `SUPPORTED_VERSION` in the sync worker and mobile app. */
+/** Must match SUPPORTED_VERSION in the sync worker and mobile app. */
 const SUPPORTED_VERSION = 2
 
 interface CatalogueMeta {
@@ -78,17 +84,28 @@ async function readMeta(): Promise<(CatalogueMeta & { prefix: string }) | null> 
   try {
     const meta: CatalogueMeta = JSON.parse(raw)
     if (meta.version !== SUPPORTED_VERSION || meta.generation < 0) return null
-    return { ...meta, prefix: `catalogue:g${meta.generation}` }
+    return { ...meta, prefix: 'catalogue:g' + meta.generation }
   } catch {
     return null
   }
+}
+
+/** Generation prefix from the last catalogue load, reused for EPG reads. */
+let _prefix: string | null = null
+
+async function resolvePrefix(): Promise<string | null> {
+  if (_prefix) return _prefix
+  const meta = await readMeta()
+  if (!meta) return null
+  _prefix = meta.prefix
+  return _prefix
 }
 
 /** Reads multiple pages of a resource concurrently and concatenates them. */
 async function readPages<T>(prefix: string, resource: string, pageCount: number): Promise<T[] | null> {
   if (pageCount <= 0 || pageCount > 200) return null
   const pagePromises = Array.from({ length: pageCount }, async (_, i) => {
-    const raw = await redisGet(`${prefix}:${resource}:page:${i}`)
+    const raw = await redisGet(prefix + ':' + resource + ':page:' + i)
     if (!raw) return null
     try {
       return JSON.parse(raw) as T[]
@@ -103,45 +120,28 @@ async function readPages<T>(prefix: string, resource: string, pageCount: number)
 
 /** Reads a resource stored under a single key. */
 async function readSingle<T>(prefix: string, resource: string): Promise<T[] | null> {
-  const raw = await redisGet(`${prefix}:${resource}`)
+  const raw = await redisGet(prefix + ':' + resource)
   if (!raw) return null
-  return JSON.parse(raw) as T[]
+  try {
+    return JSON.parse(raw) as T[]
+  } catch {
+    return null
+  }
 }
 
 // ---- Public catalogue fetchers ----
-// These match the shape the sync worker publishes.
-
-export interface CachedChannel {
-  id: string
-  name: string
-  logo: string | null
-  country: string | null
-  is_active: boolean
-  channel_categories: { category_id: string }[]
-}
-
-export interface CachedStream {
-  channel_id: string | null
-  url: string
-  quality: string | null
-  status: string | null
-}
-
-export interface CachedCategory {
-  id: string
-  name: string
-}
 
 export interface CatalogueFromRedis {
-  channels: CachedChannel[]
-  streams: CachedStream[]
-  categories: CachedCategory[]
+  channels: Channel[]
+  streams: Stream[]
+  categories: Category[]
 }
 
 /**
- * Attempts to load the full catalogue from Upstash Redis within CACHE_BUDGET_MS.
- * Returns null if Redis is not configured, a miss occurs, or the budget expires.
- * The caller must fall through to Supabase PostgREST on null.
+ * Loads the full catalogue from Upstash Redis within CACHE_BUDGET_MS.
+ *
+ * Pages are read concurrently, so wall time is the slowest single page rather
+ * than the sum of every page. Returns null on any miss or budget expiry.
  */
 export async function fetchCatalogueFromRedis(): Promise<CatalogueFromRedis | null> {
   if (!isUpstashConfigured) return null
@@ -151,15 +151,44 @@ export async function fetchCatalogueFromRedis(): Promise<CatalogueFromRedis | nu
     if (!meta) return null
 
     const [channels, streams, categories] = await Promise.all([
-      readPages<CachedChannel>(meta.prefix, 'channels', meta.pages.channels),
-      readPages<CachedStream>(meta.prefix, 'streams', meta.pages.streams),
-      readSingle<CachedCategory>(meta.prefix, 'categories'),
+      readPages<Channel>(meta.prefix, 'channels', meta.pages.channels),
+      readPages<Stream>(meta.prefix, 'streams', meta.pages.streams),
+      readSingle<Category>(meta.prefix, 'categories'),
     ])
 
     if (!channels || !streams || !categories) return null
 
+    _prefix = meta.prefix
     return { channels, streams, categories }
   })
+}
+
+/** Channel ids that have schedule data, read from the current generation. */
+export async function fetchEpgIdsFromRedis(): Promise<string[]> {
+  const prefix = await resolvePrefix()
+  if (!prefix) return []
+  const raw = await redisGet(prefix + ':epg:ids')
+  if (!raw) return []
+  try {
+    const ids = JSON.parse(raw)
+    return Array.isArray(ids) ? (ids as string[]) : []
+  } catch {
+    return []
+  }
+}
+
+/** Schedule for a single channel, read on demand from the current generation. */
+export async function fetchEpgFromRedis(channelId: string): Promise<EpgProgram[]> {
+  const prefix = await resolvePrefix()
+  if (!prefix) return []
+  const raw = await redisGet(prefix + ':epg:' + channelId)
+  if (!raw) return []
+  try {
+    const list = JSON.parse(raw)
+    return Array.isArray(list) ? (list as EpgProgram[]) : []
+  } catch {
+    return []
+  }
 }
 
 async function withBudget<T>(fn: () => Promise<T | null>): Promise<T | null> {

@@ -50,7 +50,7 @@ StreamLoomWeb/
 ├── src/
 │   ├── api/
 │   │   ├── redis.ts          # Upstash Redis REST read-only client (ADR-0015 edge catalogue cache)
-│   │   └── supabase.ts       # Supabase client (fallback catalogue, channels, streams, EPG)
+│   │   └── types.ts          # Catalogue + EPG payload types (erased at build)
 │   ├── components/
 │   │   ├── ChannelCard.tsx   # Channel card with thumbnail, country, resolution badges
 │   │   ├── HeroSection.tsx   # Featured banner with instant playback
