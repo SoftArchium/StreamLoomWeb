@@ -46,7 +46,7 @@ reads it back.
 - catalogue:g<N>:epg:<channelId>    -> EpgProgram[]  (per-channel schedule)
 
 Each Channel carries languages as ISO 639-2 codes (e.g. [eng, hin]).
-The Language filter hides itself until the sync worker publishes that field.
+The sync worker already publishes this field; when a generation omits it the Language filter hides itself rather than showing an empty control.
 
 Every key shares the generation prefix from catalogue:meta, so bumping the
 generation invalidates the catalogue and EPG together. Page counts in meta

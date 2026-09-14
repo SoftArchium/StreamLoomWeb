@@ -108,3 +108,10 @@ export function getLanguageName(code: string | null | undefined): string {
 
   return key.charAt(0).toUpperCase() + key.slice(1)
 }
+
+/** A language choice for the filters, with the live count of matching channels. */
+export interface LanguageOption {
+  code: string
+  name: string
+  count: number
+}

@@ -7,7 +7,6 @@ import { CategoryRow } from '../components/CategoryRow'
 import { SearchBar } from '../components/SearchBar'
 import { ChannelCard } from '../components/ChannelCard'
 import { FilterSheet } from '../components/FilterSheet'
-import { LanguageFilter } from '../components/LanguageFilter'
 import { useKeyboardNav } from '../hooks/useKeyboardNav'
 import { getCountryName, getCountryFlag, formatCountryDisplay } from '../util/country'
 import { getLanguageName } from '../util/language'
@@ -426,17 +425,6 @@ export function Home() {
                 {activeFilterCount > 0 && <span className="home-filter-btn__badge">{activeFilterCount}</span>}
               </button>
             </div>
-
-            {/*
-             * Language filter sits next to the Filters button so it is one
-             * click away on desktop. It renders nothing until the sync
-             * worker publishes languages.
-             */}
-            <LanguageFilter
-              availableLanguages={availableLanguages}
-              selectedLanguage={effectiveLanguage}
-              onSelectLanguage={setSelectedLanguage}
-            />
             {/* Active Filter Chips */}
             {hasActiveFilter && (
               <div className="home-active-chips">
@@ -520,6 +508,26 @@ export function Home() {
                   </select>
                   <span className="filter-select-arrow">▼</span>
                 </div>
+
+                {/* Desktop Language Select, mirroring the Country control */}
+                {availableLanguages.length > 0 && (
+                  <div className="filter-select-wrap">
+                    <select
+                      className={`filter-select ${effectiveLanguage ? 'filter-select--active' : ''}`}
+                      value={effectiveLanguage ?? ''}
+                      onChange={(e) => setSelectedLanguage(e.target.value || null)}
+                      aria-label="Filter by language"
+                    >
+                      <option value="">🌐 All Languages ({availableLanguages.length})</option>
+                      {availableLanguages.map((l) => (
+                        <option key={l.code} value={l.code}>
+                          {l.name} ({l.count})
+                        </option>
+                      ))}
+                    </select>
+                    <span className="filter-select-arrow">▼</span>
+                  </div>
+                )}
               </div>
 
               {/* Horizontally scrollable category track */}

@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react'
-import type { LanguageOption } from './LanguageFilter'
+import type { LanguageOption } from '../util/language'
 import './FilterSheet.css'
 
 interface FilterSheetProps {
