@@ -1,11 +1,81 @@
-import { useChannels } from '../hooks/useChannels'
+import { useEffect, useMemo, useState } from 'react'
+import { useChannels, useFavourites } from '../hooks/useChannels'
 import { EpgGuide } from '../components/EpgGuide'
+import type { GuideFilters, GuideFilterState } from '../util/epgFilter'
+import { EMPTY_FILTER_STATE } from '../util/epgFilter'
 import './Guide.css'
+
+/** Filter state survives navigating to the player and back. */
+const SESSION_KEYS = {
+  search: 'sl_guide_search',
+  country: 'sl_guide_country',
+  language: 'sl_guide_language',
+  category: 'sl_guide_category',
+  quality: 'sl_guide_quality',
+  favOnly: 'sl_guide_fav',
+} as const
+
+function readInitialState(): GuideFilterState {
+  const get = (key: string) => {
+    try {
+      return sessionStorage.getItem(key)
+    } catch {
+      return null
+    }
+  }
+  return {
+    search: get(SESSION_KEYS.search) ?? '',
+    country: get(SESSION_KEYS.country),
+    language: get(SESSION_KEYS.language),
+    category: get(SESSION_KEYS.category),
+    quality: get(SESSION_KEYS.quality) ?? 'All Quality',
+    favOnly: get(SESSION_KEYS.favOnly) === 'true',
+    favouriteIds: EMPTY_FILTER_STATE.favouriteIds,
+  }
+}
 
 export function Guide() {
   const { channels, epgChannelIds, loading } = useChannels()
+  const { favouriteIds } = useFavourites()
+  const [state, setState] = useState<GuideFilterState>(readInitialState)
 
-  const guideChannels = channels.filter((ch) => epgChannelIds.has(ch.id) && ch.stream)
+  // Persist each field so a trip to the player does not reset the view.
+  useEffect(() => {
+    const write = (key: string, value: string | null) => {
+      try {
+        if (value) sessionStorage.setItem(key, value)
+        else sessionStorage.removeItem(key)
+      } catch {
+        // Storage denials are non-fatal for a filter preference.
+      }
+    }
+    write(SESSION_KEYS.search, state.search || null)
+    write(SESSION_KEYS.country, state.country)
+    write(SESSION_KEYS.language, state.language)
+    write(SESSION_KEYS.category, state.category)
+    write(SESSION_KEYS.quality, state.quality === 'All Quality' ? null : state.quality)
+    write(SESSION_KEYS.favOnly, state.favOnly ? 'true' : null)
+  }, [state])
+
+  const filters: GuideFilters = useMemo(
+    () => ({
+      ...state,
+      favouriteIds,
+      onSearch: (value) => setState((s) => ({ ...s, search: value })),
+      onCountry: (value) => setState((s) => ({ ...s, country: value })),
+      onLanguage: (value) => setState((s) => ({ ...s, language: value })),
+      onCategory: (value) => setState((s) => ({ ...s, category: value })),
+      onQuality: (value) => setState((s) => ({ ...s, quality: value })),
+      onToggleFav: () => setState((s) => ({ ...s, favOnly: !s.favOnly })),
+      onClear: () => setState((s) => ({ ...EMPTY_FILTER_STATE, favouriteIds: s.favouriteIds })),
+    }),
+    [state, favouriteIds],
+  )
+
+  const availableCount = useMemo(
+    () => channels.filter((ch) => epgChannelIds.has(ch.id) && ch.stream).length,
+    [channels, epgChannelIds],
+  )
 
   return (
     <div className="guide-page">
@@ -13,10 +83,14 @@ export function Guide() {
         <h1 className="guide-page__title">
           TV Guide
           {!loading && (
-            <span className="guide-page__count">{guideChannels.length} channels</span>
+            <span className="guide-page__count">
+              {availableCount.toLocaleString()} channels with schedules
+            </span>
           )}
         </h1>
-        <p className="guide-page__subtitle">Live schedules · Click any programme to watch</p>
+        <p className="guide-page__subtitle">
+          Live schedules · Click any programme to watch
+        </p>
       </div>
 
       {loading ? (
@@ -25,8 +99,9 @@ export function Guide() {
           <p>Loading channel guide…</p>
         </div>
       ) : (
-        <EpgGuide channels={channels} epgChannelIds={epgChannelIds} />
+        <EpgGuide channels={channels} epgChannelIds={epgChannelIds} filters={filters} />
       )}
     </div>
   )
 }
+

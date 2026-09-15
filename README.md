@@ -9,7 +9,7 @@
 | Feature | Details |
 |---|---|
 | 📺 Live TV | Thousands of channels via HLS.js, resolution-first stream selection, 5 Mbps fast-start buffer, resilient stream retries |
-| 📅 TV Guide (EPG) | Full timeline guide scrolled to current time, click-to-watch |
+| 📅 TV Guide (EPG) | Virtualized timeline grid anchored to now, channel search, faceted filters, one-click English translation of programme titles |
 | ❤️ Favourites | Pin channels with persistent local storage |
 | 🕘 Continue Watching | Auto-records recently watched channels |
 | 🎯 Mobile Filter Parity | Priority categories (Music 🎵, Movies 🎬, Cartoons 🦄, Comedy 😂, News 📰, Sports ⚽), Resolution filter (4K, FHD, HD, SD), and Country picker |
@@ -62,6 +62,22 @@ Copy `.env.example` to `.env`:
 VITE_UPSTASH_REDIS_REST_URL=https://your-upstash-endpoint.upstash.io
 VITE_UPSTASH_REDIS_REST_READONLY_TOKEN=your_upstash_readonly_token
 ```
+
+Both are required — without them the app has no catalogue to read.
+
+### Optional: TV Guide translation
+
+The Guide's `English` toggle translates programme titles. Point it at a
+LibreTranslate-compatible endpoint; without one it falls back to the public
+MyMemory API, which is rate limited.
+
+```bash
+VITE_TRANSLATE_URL=https://your-libretranslate.example.com/translate
+VITE_TRANSLATE_API_KEY=            # only if the endpoint requires a key
+```
+
+Translations are cached in memory and in localStorage, requests are debounced
+and batched, and only titles that look non-English are sent at all.
 
 ---
 

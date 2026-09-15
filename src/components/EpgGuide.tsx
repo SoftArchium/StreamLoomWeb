@@ -1,269 +1,340 @@
-import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import type { EnrichedChannel } from '../hooks/useChannels'
-import type { EpgProgram } from '../api/types'
+import type { EnrichedChannel, EpgProgram } from '../api/types'
 import { fetchEpgFromRedis } from '../api/redis'
-import { LOGO_SIZE, logoUrl, handleLogoError } from '../util/logo'
+import {
+  PIXELS_PER_MINUTE,
+  ROW_HEIGHT,
+  SIDEBAR_WIDTH,
+  NOW_REFRESH_MS,
+  buildGuideWindow,
+  hourMarks,
+} from '../util/epgTime'
+import {
+  isTranslationEnabled,
+  setTranslationEnabled,
+  useTranslationVersion,
+} from '../util/translate'
+import { applyFilters } from '../util/epgFilter'
+import type { GuideFilters } from '../util/epgFilter'
+import { EpgToolbar } from './EpgToolbar'
+import { EpgTimeline } from './EpgTimeline'
+import { EpgRow } from './EpgRow'
 import './EpgGuide.css'
 
 interface Props {
   channels: EnrichedChannel[]
   epgChannelIds: Set<string>
+  filters: GuideFilters
 }
 
-const PIXELS_PER_MINUTE = 4
-const EPG_BATCH_SIZE = 30
+/** Rows rendered beyond the viewport on each side. */
+const OVERSCAN_PX = 320
 
-function formatTime(iso: string) {
-  return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+/** Channels whose schedules are requested at once. */
+const FETCH_CONCURRENCY = 12
+
+/**
+ * Module-level EPG cache.
+ *
+ * Shared with the Watch page's `useEpg`, so moving between guide and player
+ * never refetches a schedule, and the row list stays referentially stable while
+ * a fetch is in flight.
+ *
+ * Capped: a full guide can touch thousands of channels and each schedule is a
+ * day of programmes, so entries are evicted oldest-first once the cap is hit.
+ */
+const EPG_CACHE_LIMIT = 1500
+const epgCache = new Map<string, EpgProgram[]>()
+
+function cacheEpg(channelId: string, programs: EpgProgram[]) {
+  epgCache.set(channelId, programs)
+  if (epgCache.size > EPG_CACHE_LIMIT) {
+    // Map preserves insertion order, so the first key is the stalest.
+    const oldest = epgCache.keys().next().value
+    if (oldest !== undefined) epgCache.delete(oldest)
+  }
 }
 
-function minutesSinceMidnight(iso: string) {
-  const d = new Date(iso)
-  return d.getHours() * 60 + d.getMinutes()
+/** Program list for a channel, always the same array instance per schedule. */
+function cachedEpg(channelId: string): EpgProgram[] | undefined {
+  return epgCache.get(channelId)
 }
 
-function nowMinutes() {
-  const d = new Date()
-  return d.getHours() * 60 + d.getMinutes()
+async function loadEpg(channelId: string): Promise<EpgProgram[]> {
+  const cached = epgCache.get(channelId)
+  if (cached) return cached
+  try {
+    const data = await fetchEpgFromRedis(channelId)
+    cacheEpg(channelId, data)
+    return data
+  } catch {
+    const empty: EpgProgram[] = []
+    cacheEpg(channelId, empty)
+    return empty
+  }
 }
 
-export function EpgGuide({ channels, epgChannelIds }: Props) {
-  const navigate = useNavigate()
-  const guideChannels = useMemo(
-    () => channels.filter((ch) => epgChannelIds.has(ch.id) && ch.stream),
-    [channels, epgChannelIds]
-  )
-  const [epgMap, setEpgMap] = useState<Map<string, EpgProgram[]>>(new Map())
-  const [loadedCount, setLoadedCount] = useState(0)
-  const timelineRef = useRef<HTMLDivElement>(null)
-  const sentinelRef = useRef<HTMLDivElement>(null)
-  const [expandedCount, setExpandedCount] = useState(0)
 
-  // Reset pagination during render when the underlying guide channel set changes
-  const guideKey = useMemo(() => guideChannels.map((c) => c.id).join(','), [guideChannels])
-  const [prevGuideKey, setPrevGuideKey] = useState(guideKey)
-  if (prevGuideKey !== guideKey) {
-    setPrevGuideKey(guideKey)
-    setExpandedCount(0)
-    setLoadedCount(0)
-    setEpgMap(new Map())
+
+// ---- Program loading state ----
+
+/** Channels whose schedule request is already in flight. */
+const inflight = new Set<string>()
+
+/** Stable empty list so rows without a schedule keep one prop identity. */
+const EMPTY_PROGRAMS: EpgProgram[] = []
+
+/** Requests schedules for `ids`, at most FETCH_CONCURRENCY at a time.
+ *
+ * Notifications are coalesced per animation frame: a screenful of schedules
+ * arrives as dozens of separate awaits, and repainting per channel would cost
+ * one render each instead of one render for the whole wave.
+ */
+function prefetchEpg(ids: string[], onLoaded: () => void) {
+  const missing = ids.filter((id) => !epgCache.has(id) && !inflight.has(id))
+  if (missing.length === 0) return
+
+  let index = 0
+  let pendingNotify = false
+  const scheduleNotify = () => {
+    if (pendingNotify) return
+    pendingNotify = true
+    // Coalesce every completion in this frame into a single repaint.
+    queueMicrotask(() => {
+      pendingNotify = false
+      onLoaded()
+    })
   }
 
-  const visibleCount = Math.min(EPG_BATCH_SIZE + expandedCount, guideChannels.length)
-  const visibleChannels = useMemo(
-    () => guideChannels.slice(0, visibleCount),
-    [guideChannels, visibleCount]
-  )
-  const hasMore = visibleChannels.length < guideChannels.length
-  const channelIdsKey = useMemo(() => visibleChannels.map((c) => c.id).join(','), [visibleChannels])
-
-  const loadMore = useCallback(() => {
-    setExpandedCount((prev) => Math.min(prev + EPG_BATCH_SIZE, guideChannels.length))
-  }, [guideChannels.length])
-
-  // Fetch EPG for channels
-  useEffect(() => {
-    let cancelled = false
-
-    async function load() {
-      const batchSize = 5
-      for (let i = 0; i < visibleChannels.length; i += batchSize) {
-        if (cancelled) break
-        const batch = visibleChannels.slice(i, i + batchSize)
-        const results = await Promise.all(
-          batch.map(async (ch) => {
-            try {
-              const data = await fetchEpgFromRedis(ch.id)
-              return { id: ch.id, data }
-            } catch {
-              return { id: ch.id, data: [] }
-            }
-          })
-        )
-
-        if (cancelled) break
-
-        setEpgMap((prev) => {
-          const next = new Map(prev)
-          for (const item of results) {
-            next.set(item.id, item.data)
-          }
-          return next
-        })
-        setLoadedCount((n) => n + batch.length)
+  const workers = Array.from({ length: Math.min(FETCH_CONCURRENCY, missing.length) }, async () => {
+    while (index < missing.length) {
+      const id = missing[index]
+      index += 1
+      inflight.add(id)
+      try {
+        await loadEpg(id)
+      } finally {
+        inflight.delete(id)
       }
+      scheduleNotify()
     }
+  })
+  void Promise.all(workers)
+}
 
-    if (visibleChannels.length > 0) {
-      load()
-    }
-
-    return () => {
-      cancelled = true
-    }
-  }, [channelIdsKey, visibleChannels])
-
-  // Scroll to current time
+/** Sidebar width and row height per breakpoint.
+ *
+ *  JS owns both so the sticky column, the spacer width, the now-line offset and
+ *  the virtualizer can never disagree with what is actually painted — a mismatch
+ *  is what makes rows overlap or leave gaps. */
+function useGuideMetrics() {
+  const [metrics, setMetrics] = useState(() => guideMetricsFor(currentViewportWidth()))
   useEffect(() => {
-    const offset = nowMinutes() * PIXELS_PER_MINUTE - 120
-    timelineRef.current?.scrollTo({ left: Math.max(0, offset), behavior: 'smooth' })
+    const onResize = () => setMetrics(guideMetricsFor(currentViewportWidth()))
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
+  return metrics
+}
+
+/** Viewport width, defaulting to a desktop grid when there is no window. */
+function currentViewportWidth(): number {
+  return typeof window === 'undefined' ? 1440 : window.innerWidth
+}
+
+function guideMetricsFor(viewportWidth: number): { sidebar: number; rowHeight: number } {
+  if (viewportWidth <= 480) return { sidebar: 104, rowHeight: 52 }
+  if (viewportWidth <= 768) return { sidebar: 132, rowHeight: 56 }
+  return { sidebar: SIDEBAR_WIDTH, rowHeight: ROW_HEIGHT }
+}
+
+export function EpgGuide({ channels, epgChannelIds, filters }: Props) {
+  const navigate = useNavigate()
+  const viewportRef = useRef<HTMLDivElement>(null)
+  const rafRef = useRef(0)
+  const { sidebar: sidebarWidth, rowHeight } = useGuideMetrics()
+  const [scrollTop, setScrollTop] = useState(0)
+  const [viewportH, setViewportH] = useState(640)
+  const [translate, setTranslateState] = useState(isTranslationEnabled)
+  // Version counter drives re-render when the translation store changes.
+  useTranslationVersion()
+  // Bumped when a wave of schedules lands, which is what makes the virtualized
+  // rows pick up their programs from the cache below.
+  const [cacheTick, setCacheTick] = useState(0)
+
+  // Hour labels and the now-marker re-anchor once a minute. Keeping this in
+  // separate state from scroll means scrolling never recomputes the timeline.
+  const [now, setNow] = useState(() => new Date())
+  useEffect(() => {
+    const timer = setInterval(() => setNow(new Date()), NOW_REFRESH_MS)
+    return () => clearInterval(timer)
   }, [])
 
-  // Auto-load next batch of channels as the sentinel scrolls into view
+  const gridWindow = useMemo(() => buildGuideWindow(now), [now])
+  const marks = useMemo(() => hourMarks(gridWindow), [gridWindow])
+  const nowOffset = gridWindow.nowOffset
+
+  // Translation state lives outside React; the version hook above re-renders on
+  // change, so the local flag only needs to mirror the toggle.
+
+  // A schedule arriving must repaint the rows that now have data. The callback
+  // is coalesced by `prefetchEpg`, so a whole wave costs one render.
+  const bumpCache = useCallback(() => setCacheTick((t) => t + 1), [])
+
+  // Guide channels: have a schedule key, are playable, and pass the toolbar.
+  const guideChannels = useMemo(
+    () => applyFilters(channels.filter((ch) => epgChannelIds.has(ch.id) && ch.stream), filters),
+    [channels, epgChannelIds, filters],
+  )
+
+  // Ids only: the prefetch effect must not restart when the search text changes
+  // but the matching set is identical.
+  const guideKey = useMemo(() => guideChannels.map((c) => c.id).join('\u0000'), [guideChannels])
+  const guideIdsRef = useRef<string[]>([])
+
+  // Prefetch the first screens' worth of schedules immediately, then the rest in
+  // the background so scrolling into new rows never waits on the network.
   useEffect(() => {
-    const sentinel = sentinelRef.current
-    if (!sentinel || !hasMore) return
+    guideIdsRef.current = guideChannels.map((c) => c.id)
+    if (guideIdsRef.current.length === 0) return
+    const firstScreen = Math.ceil(viewportH / rowHeight) + 12
+    prefetchEpg(guideIdsRef.current.slice(0, firstScreen), bumpCache)
+    const timer = setTimeout(() => prefetchEpg(guideIdsRef.current, bumpCache), 400)
+    return () => clearTimeout(timer)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the id set
+  }, [guideKey, viewportH, rowHeight, bumpCache])
 
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries.some((entry) => entry.isIntersecting)) loadMore()
-      },
-      { rootMargin: '300px' }
-    )
+  // Vertical virtualization: only rows intersecting the viewport are rendered.
+  const totalHeight = guideChannels.length * rowHeight
+  const firstRow = Math.max(0, Math.floor((scrollTop - OVERSCAN_PX) / rowHeight))
+  const lastRow = Math.min(
+    guideChannels.length,
+    Math.ceil((scrollTop + viewportH + OVERSCAN_PX) / rowHeight),
+  )
+  const visibleRows = useMemo(
+    () => guideChannels.slice(firstRow, lastRow),
+    // `cacheTick` is the re-render trigger for schedules arriving; the slice
+    // itself only depends on the row window.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [guideChannels, firstRow, lastRow, cacheTick],
+  )
 
-    observer.observe(sentinel)
+  const handleScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
+    const el = e.currentTarget
+    // rAF-throttle: one state write per frame regardless of scroll event rate.
+    if (rafRef.current) return
+    rafRef.current = requestAnimationFrame(() => {
+      rafRef.current = 0
+      setScrollTop(el.scrollTop)
+    })
+  }, [])
+
+  useEffect(() => {
+    const el = viewportRef.current
+    if (!el) return
+    const measure = () => setViewportH(el.clientHeight)
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(el)
     return () => observer.disconnect()
-  }, [hasMore, loadMore, visibleCount])
+  }, [])
 
-  const hours = Array.from({ length: 24 }, (_, h) => h)
-  const [now] = useState(() => nowMinutes())
-  const guidePlaylist = useMemo(() => visibleChannels.map((c) => c.id), [visibleChannels])
+  const scrollToNow = useCallback(() => {
+    const el = viewportRef.current
+    if (!el) return
+    el.scrollTo({ top: 0, behavior: 'smooth' })
+  }, [])
 
-  // Restore focus to last viewed channel on return to guide
+  // Stable across filter edits: rows are memoized on this prop, so a new
+  // identity here would re-render every visible row on each keystroke.
+  const playlistRef = useRef<string[]>([])
+  useEffect(() => {
+    playlistRef.current = guideChannels.map((c) => c.id)
+  }, [guideChannels])
+
+  const handlePick = useCallback(
+    (channelId: string) => {
+      sessionStorage.setItem('sl_last_viewed', channelId)
+      navigate(`/watch/${encodeURIComponent(channelId)}`, {
+        state: { playlist: playlistRef.current, returnTo: '/guide' },
+      })
+    },
+    [navigate],
+  )
+
+  // Restore the row that was last watched.
   useEffect(() => {
     const targetId = sessionStorage.getItem('sl_last_viewed')
-    if (!targetId || visibleChannels.length === 0) return
-
-    const timer = setTimeout(() => {
-      const el = document.querySelector(`[data-channel-id="${targetId}"]`) as HTMLElement | null
-      if (el) {
-        el.focus({ preventScroll: false })
-        el.scrollIntoView({ behavior: 'smooth', block: 'center' })
-      }
-    }, 100)
-
-    return () => clearTimeout(timer)
-  }, [visibleChannels.length])
+    if (!targetId || guideChannels.length === 0) return
+    const index = guideChannels.findIndex((c) => c.id === targetId)
+    const el = viewportRef.current
+    if (index < 0 || !el) return
+    el.scrollTop = Math.max(0, index * rowHeight - el.clientHeight / 2 + rowHeight / 2)
+    setScrollTop(el.scrollTop)
+  }, [guideChannels, rowHeight])
 
   return (
-    <div className="epg-guide">
-      <div className="epg-guide__header glass">
-        <div className="epg-guide__sidebar-spacer">Channels</div>
-        <div className="epg-guide__timeline-header" ref={timelineRef}>
-          {hours.map((h) => (
-            <div
-              key={h}
-              className="epg-guide__hour-label"
-              style={{ left: h * 60 * PIXELS_PER_MINUTE }}
-            >
-              {String(h).padStart(2, '0')}:00
-            </div>
-          ))}
+    <div
+      className="epg-guide"
+      style={{
+        ['--epg-sidebar-w' as string]: sidebarWidth + 'px',
+        ['--epg-row-h' as string]: rowHeight + 'px',
+      }}
+    >
+      <EpgToolbar
+        filters={filters}
+        channels={channels}
+        epgChannelIds={epgChannelIds}
+        resultCount={guideChannels.length}
+        translate={translate}
+        onToggleTranslate={() => {
+          setTranslationEnabled(!translate)
+          setTranslateState(!translate)
+        }}
+        onScrollToNow={scrollToNow}
+      />
+
+      <div className="epg-guide__grid" ref={viewportRef} onScroll={handleScroll}>
+        <EpgTimeline
+          marks={marks}
+          gridWidth={gridWindow.width}
+          nowOffset={nowOffset}
+          sidebarWidth={sidebarWidth}
+        />
+
+        {guideChannels.length > 0 ? (
           <div
-            className="epg-guide__now-line"
-            style={{ left: now * PIXELS_PER_MINUTE }}
-          />
-        </div>
-      </div>
-
-      <div className="epg-guide__body">
-        {loadedCount < visibleChannels.length && (
-          <div className="epg-guide__loading">
-            Loading schedules… {loadedCount}/{visibleChannels.length}
+            className="epg-guide__spacer"
+            style={{ height: totalHeight, width: sidebarWidth + gridWindow.width }}
+          >
+            {visibleRows.map((ch, i) => (
+              <EpgRow
+                key={ch.id}
+                channel={ch}
+                programs={cachedEpg(ch.id) ?? EMPTY_PROGRAMS}
+                origin={gridWindow.origin}
+                nowOffset={nowOffset}
+                translate={translate}
+                sidebarWidth={sidebarWidth}
+                top={(firstRow + i) * rowHeight}
+                rowHeight={rowHeight}
+                onPick={handlePick}
+              />
+            ))}
+            <div
+              className="epg-guide__now-line"
+              style={{ transform: `translateX(${nowOffset * PIXELS_PER_MINUTE}px)` }}
+            />
+          </div>
+        ) : (
+          <div className="epg-guide__empty">
+            <p className="epg-guide__empty-title">No channels match these filters</p>
+            <p className="epg-guide__empty-hint">
+              Try clearing the search or choosing a different country, language or category.
+            </p>
           </div>
         )}
-
-        {visibleChannels.map((ch) => {
-          const programs = epgMap.get(ch.id) ?? []
-          const logoSrc = logoUrl(ch.logo)
-          return (
-            <div key={ch.id} className="epg-guide__row">
-              {/* Channel sidebar */}
-              <div
-                className="epg-guide__channel-cell glass"
-                data-channel-id={ch.id}
-                onClick={() => {
-                  sessionStorage.setItem('sl_last_viewed', ch.id)
-                  navigate(`/watch/${encodeURIComponent(ch.id)}`, {
-                    state: {
-                      playlist: guidePlaylist,
-                      returnTo: '/guide',
-                    },
-                  })
-                }}
-                role="button"
-                tabIndex={0}
-              >
-                {logoSrc ? (
-                  <img
-                    src={logoSrc}
-                    alt={ch.name}
-                    width={LOGO_SIZE}
-                    height={LOGO_SIZE}
-                    decoding="async"
-                    onError={handleLogoError}
-                    className="epg-guide__channel-logo"
-                  />
-                ) : (
-                  <span className="epg-guide__channel-initials">
-                    {ch.name.slice(0, 2).toUpperCase()}
-                  </span>
-                )}
-                <span className="epg-guide__channel-name">{ch.name}</span>
-              </div>
-
-              {/* Programs timeline */}
-              <div className="epg-guide__programs">
-                {programs.map((prog) => {
-                  const startMin = minutesSinceMidnight(prog.start_time)
-                  const endMin = minutesSinceMidnight(prog.end_time)
-                  const width = Math.max((endMin - startMin) * PIXELS_PER_MINUTE, 60)
-                  const left = startMin * PIXELS_PER_MINUTE
-                  const isNow = now >= startMin && now < endMin
-
-                  return (
-                    <div
-                      key={prog.id}
-                      className={`epg-guide__program ${isNow ? 'epg-guide__program--now' : ''}`}
-                      style={{ left, width }}
-                      title={`${formatTime(prog.start_time)} – ${prog.title}`}
-                      onClick={() => {
-                        sessionStorage.setItem('sl_last_viewed', ch.id)
-                        navigate(`/watch/${encodeURIComponent(ch.id)}`, {
-                          state: {
-                            playlist: guidePlaylist,
-                            returnTo: '/guide',
-                          },
-                        })
-                      }}
-                    >
-                      <span className="epg-guide__prog-title">{prog.title}</span>
-                      <span className="epg-guide__prog-time">{formatTime(prog.start_time)}</span>
-                    </div>
-                  )
-                })}
-                {programs.length === 0 && epgMap.has(ch.id) && (
-                  <div className="epg-guide__no-prog">No schedule data available</div>
-                )}
-              </div>
-            </div>
-          )
-        })}
-
-        {visibleChannels.length === 0 && (
-          <div className="epg-guide__empty">No channels with schedule data available</div>
-        )}
-
-        {hasMore && (
-          <div className="epg-guide__load-more">
-            <button className="epg-guide__load-more__btn" onClick={loadMore}>
-              Load More Channels ({guideChannels.length - visibleChannels.length} remaining)
-            </button>
-          </div>
-        )}
-
-        <div ref={sentinelRef} className="epg-guide__sentinel" aria-hidden="true" />
       </div>
     </div>
   )
