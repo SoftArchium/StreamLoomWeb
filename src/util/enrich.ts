@@ -1,9 +1,11 @@
 import type { Channel, EnrichedChannel, Stream } from '../api/types'
+import { orderStreamsForPlayback } from './resolution'
 
 /** Working-stream cache entry, passed in so this stays free of browser storage. */
 export interface WorkingRecord {
   url: string
   useProxy: boolean
+  quality?: string | null
 }
 
 /**
@@ -32,36 +34,14 @@ export function enrichChannels(
   return rawChannels.map((ch) => {
     const channelStreams = streamMap.get(ch.id) || []
     const cachedWorking = working[ch.id]
-    const workingCandidate = cachedWorking
-      ? channelStreams.find((s) => s.url === cachedWorking.url)
-      : null
 
-    let orderedStreams = channelStreams
-    if (workingCandidate) {
-      orderedStreams = [
-        workingCandidate,
-        ...channelStreams.filter((s) => s.url !== workingCandidate.url),
-      ]
-    }
-
-    // Prefer the known-good stream, then active HTTPS, HTTPS, active HTTP, first
-    const bestStream =
-      workingCandidate ||
-      orderedStreams.find((s) => s.url.startsWith('https://') && s.status === 'active') ||
-      orderedStreams.find((s) => s.url.startsWith('https://')) ||
-      orderedStreams.find((s) => s.url.startsWith('http://') && s.status === 'active') ||
-      orderedStreams[0]
-
-    if (bestStream && orderedStreams.length > 1) {
-      orderedStreams = [
-        bestStream,
-        ...orderedStreams.filter((s) => s.url !== bestStream.url),
-      ]
-    }
+    // Highest resolution first, with the cached working stream promoted only when
+    // no better resolution is available for this channel.
+    const orderedStreams = orderStreamsForPlayback(channelStreams, cachedWorking?.url)
 
     return {
       ...ch,
-      stream: bestStream,
+      stream: orderedStreams[0],
       streams: orderedStreams,
       categoryIds: ch.channel_categories.map((c) => c.category_id),
     }

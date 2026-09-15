@@ -8,7 +8,7 @@
 
 | Feature | Details |
 |---|---|
-| 📺 Live TV | Thousands of channels via HLS.js, 5 Mbps fast-start buffer, resilient stream retries |
+| 📺 Live TV | Thousands of channels via HLS.js, resolution-first stream selection, 5 Mbps fast-start buffer, resilient stream retries |
 | 📅 TV Guide (EPG) | Full timeline guide scrolled to current time, click-to-watch |
 | ❤️ Favourites | Pin channels with persistent local storage |
 | 🕘 Continue Watching | Auto-records recently watched channels |

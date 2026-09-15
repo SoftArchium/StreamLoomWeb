@@ -64,6 +64,7 @@ StreamLoomWeb/
 │   │   ├── Watch.tsx         # Video playback route with playlist memory
 │   │   └── Settings.tsx      # Low-latency, auto-skip, hide-broken toggles, cache reset
 │   ├── util/
+│   │   ├── resolution.ts     # Resolution ranking + resolution-first candidate ordering
 │   │   ├── stream.ts         # Edge proxy URL generator, working stream cache, broken stream registry
 │   │   ├── country.ts        # Country code to flag/name formatting
 │   │   └── shortcuts.ts      # Keyboard navigation helpers
@@ -87,6 +88,18 @@ StreamLoomWeb/
   - When a candidate works (`MANIFEST_PARSED` / `FRAG_BUFFERED`), it is cached via `cacheWorkingStream(channel.id, url, isProxied)` in `sl_working_streams_v1` (7-day TTL).
   - `enrichChannels` in `useChannels.ts` unshifts cached working streams to index 0 so subsequent visits load instantly.
   - If a cached stream fails in the future, candidate shuffling automatically finds a new working stream and updates the cache (self-healing).
+
+### 2b. Resolution-First Selection
+- **Rule**: `Stream.quality` (`"4K"`, `"FHD"`, `"1080p"`, `"HD"`, `"SD"`, ...) decides candidate order. The highest resolution candidate is always index 0.
+- `src/util/resolution.ts` owns `rankResolution()` and `orderStreamsForPlayback()`; `enrich.ts`, `VideoPlayer.tsx` and `functions/api/streams.ts` all use the same ranking so client and edge never disagree.
+- A cached working stream keeps the front position **only** while no higher resolution candidate exists, so a previously cached 360p stream cannot pin a channel away from its 1080p feed.
+- `/api/streams` accepts `qualities` aligned positionally with `urls`, ranks candidates by resolution before probing, and caches the highest resolution candidate that verified live.
+- `cacheWorkingStream(channelId, url, useProxy, quality?)` persists the resolution label alongside the URL.
+
+### 3. Startup & Channel-Switch Latency
+- HLS runs with `enableWorker: false` — worker spawn costs 100–300 ms on low-end TV browsers while the parse work is negligible.
+- `testBandwidth: false` plus `startFragPrefetch` and `abrEwmaDefaultEstimate: 5 Mbps` avoid an ABR ramp-up from low quality on fast connections.
+- `VideoPlayer.tsx` warms the next channel's resolved manifest with a `priority: 'low'` fetch 1.5 s after playback starts, so the browser and edge cache are primed before the user switches.
 
 ### 3. Keyboard & Smart TV Navigation
 - Navigation uses a single stable listener pattern with `onKeyRef` in `VideoPlayer.tsx` to ensure zero dropped keypresses.

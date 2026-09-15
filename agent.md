@@ -37,6 +37,7 @@ StreamLoomWeb/
 │   │   ├── Watch.tsx          # Fullscreen / embedded playback route
 │   │   └── Settings.tsx       # Latency profile, auto-skip & hide-broken toggles, cache clear
 │   ├── util/
+│   │   ├── resolution.ts      # Resolution ranking + resolution-first candidate ordering
 │   │   ├── stream.ts          # Stream caching, proxy formatting, mixed-content checks
 │   │   ├── country.ts         # Country code resolution and flag rendering
 │   │   └── shortcuts.ts       # Global keybinding definitions
@@ -83,9 +84,17 @@ StreamLoomWeb/
   1. Plain HTTP streams on HTTPS origins immediately use the edge proxy.
   2. If a direct HTTPS stream fails or stalls for 6.5s, it retries via edge proxy.
   3. If edge proxy fails or stalls for 6.5s, it automatically advances to the next candidate stream.
-  4. Once a candidate stream parses its manifest or buffers a fragment, it is recorded via `cacheWorkingStream(channel.id, url, useProxy)` into `localStorage` (`sl_working_streams_v1`, 7-day TTL).
+  4. Once a candidate stream parses its manifest or buffers a fragment, it is recorded via `cacheWorkingStream(channel.id, url, useProxy, quality)` into `localStorage` (`sl_working_streams_v1`, 7-day TTL).
   5. The working candidate is placed at index 0 on subsequent visits, guaranteeing fast startup times.
   6. The system is self-healing: if an old cached stream stops working, candidate shuffling automatically finds and caches a new one.
+
+### 2b. Resolution-First Candidate Selection
+- `Stream.quality` carries the resolution label ("4K", "FHD", "1080p", "HD", "SD", ...).
+- `src/util/resolution.ts` owns the ranking (`rankResolution`) and ordering (`orderStreamsForPlayback`).
+- **Invariant**: the highest resolution candidate is always index 0, so playback starts on the best quality.
+- A cached working stream only holds the front position while no higher resolution candidate exists.
+- `enrich.ts` (worker + main thread), `VideoPlayer.tsx` and the `/api/streams` edge probe all share this ordering.
+- The edge probe receives `qualities` aligned positionally with `urls`, ranks candidates before probing, and returns the highest resolution candidate that verified live.
 
 ### 3. Keyboard & Smart TV Remote Navigation
 - Live TV interfaces require continuous keyboard and TV remote control.

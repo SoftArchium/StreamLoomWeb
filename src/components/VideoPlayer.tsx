@@ -6,6 +6,7 @@ import type { EpgProgram } from '../api/types'
 import { useEpg, useFavourites, useRecent } from '../hooks/useChannels'
 import { formatCountryDisplay } from '../util/country'
 import { LOGO_SIZE, logoUrl, handleLogoError } from '../util/logo'
+import { orderStreamsForPlayback, rankResolution } from '../util/resolution'
 import {
   getProxyStreamUrl,
   isMixedContent,
@@ -92,27 +93,23 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
       : (channel.stream ? [channel.stream] : [])
 
     const cached = getCachedWorkingStream(channel.id)
-    if (cached && rawStreams.length > 1) {
-      const match = rawStreams.find((s) => s.url === cached.url)
-      if (match) {
-        return [match, ...rawStreams.filter((s) => s.url !== cached.url)]
-      }
-    }
-    return rawStreams
+    return orderStreamsForPlayback(rawStreams, cached?.url)
   }, [channel])
 
   const [prevChannelId, setPrevChannelId] = useState(channel.id)
   const [activeStreamIdx, setActiveStreamIdx] = useState(0)
   const [isProxied, setIsProxied] = useState(() => {
+    const ordered = orderStreamsForPlayback(
+      channel.streams && channel.streams.length > 0
+        ? channel.streams
+        : (channel.stream ? [channel.stream] : []),
+      getCachedWorkingStream(channel.id)?.url
+    )
+    const first = ordered[0]
+    if (!first) return false
     const cached = getCachedWorkingStream(channel.id)
-    const rawStreams = channel.streams && channel.streams.length > 0
-      ? channel.streams
-      : (channel.stream ? [channel.stream] : [])
-    const firstUrl = (cached && rawStreams.find((s) => s.url === cached.url)?.url) || rawStreams[0]?.url
-    if (firstUrl && cached && cached.url === firstUrl) {
-      return cached.useProxy || isMixedContent(firstUrl)
-    }
-    return firstUrl ? isMixedContent(firstUrl) : false
+    if (cached && cached.url === first.url) return cached.useProxy || isMixedContent(first.url)
+    return isMixedContent(first.url)
   })
   const [retryNonce, setRetryNonce] = useState(0)
 
@@ -131,10 +128,13 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
     setPrevChannelId(channel.id)
     setActiveStreamIdx(0)
     const cached = getCachedWorkingStream(channel.id)
-    const rawStreams = channel.streams && channel.streams.length > 0
-      ? channel.streams
-      : (channel.stream ? [channel.stream] : [])
-    const firstCandidate = (cached && rawStreams.find((s) => s.url === cached.url)) || rawStreams[0]
+    const orderedStreams = orderStreamsForPlayback(
+      channel.streams && channel.streams.length > 0
+        ? channel.streams
+        : (channel.stream ? [channel.stream] : []),
+      cached?.url
+    )
+    const firstCandidate = orderedStreams[0]
     const initProxy = firstCandidate
       ? ((cached && cached.url === firstCandidate.url ? cached.useProxy : false) || isMixedContent(firstCandidate.url))
       : false
@@ -159,18 +159,43 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
     channelStreamsRef.current = channelStreams
   }, [channel, allChannels, activeStreamIdx, isProxied, channelStreams])
 
-  // Proactively check edge-verified working stream for this POP if channel has multiple candidates
+  // Proactively check edge-verified working streams for this POP when the channel
+  // has multiple candidates, then upgrade to the highest resolution that verified.
   useEffect(() => {
     if (!channelStreams || channelStreams.length <= 1) return
     const cached = getCachedWorkingStream(channel.id)
-    if (cached) return
+
+    // Skip when the cached stream is already the best resolution available.
+    if (cached) {
+      const cachedStream = channelStreams.find((s) => s.url === cached.url)
+      const best = channelStreams[0]
+      if (cachedStream && rankResolution(cachedStream.quality) >= rankResolution(best?.quality)) {
+        return
+      }
+    }
 
     let cancelled = false
     const urls = channelStreams.map((s) => s.url)
-    fetchEdgeVerifiedStreams(channel.id, urls).then((result) => {
-      if (cancelled || !result || !result.workingStream) return
-      cacheWorkingStream(channel.id, result.workingStream, isProxiedRef.current)
-      const matchIdx = channelStreamsRef.current.findIndex((s) => s.url === result.workingStream)
+    const qualities = channelStreams.map((s) => s.quality)
+    fetchEdgeVerifiedStreams(channel.id, urls, qualities).then((result) => {
+      if (cancelled || !result) return
+      const verified = result.workingCandidates.length > 0
+        ? result.workingCandidates
+        : result.workingStream
+          ? [result.workingStream]
+          : []
+      if (verified.length === 0) return
+
+      // Highest resolution among the candidates the edge confirmed as live.
+      const bestVerified = verified
+        .map((u) => channelStreamsRef.current.find((s) => s.url === u))
+        .filter((s): s is EnrichedChannel['streams'][number] => Boolean(s))
+        .sort((a, b) => rankResolution(b.quality) - rankResolution(a.quality))[0]
+
+      if (!bestVerified) return
+      cacheWorkingStream(channel.id, bestVerified.url, isProxiedRef.current, bestVerified.quality)
+
+      const matchIdx = channelStreamsRef.current.findIndex((s) => s.url === bestVerified.url)
       if (matchIdx > 0 && activeStreamIdxRef.current === 0) {
         setActiveStreamIdx(matchIdx)
       }
@@ -497,6 +522,35 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
 
   const channelIdx = allChannels.findIndex((c) => c.id === channel.id)
 
+  /**
+   * Warms the next channel's manifest while the current channel still plays.
+   *
+   * HLS spends its first 300-800ms fetching and parsing the manifest. Firing a
+   * single low-priority request for the resolved URL ahead of time lets the edge
+   * and browser cache the response, so switching feels instant.
+   */
+  useEffect(() => {
+    if (allChannels.length <= 1) return
+    const idx = allChannels.findIndex((c) => c.id === channel.id)
+    const neighbour = idx >= 0 ? allChannels[(idx + 1) % allChannels.length] : allChannels[0]
+    if (!neighbour || neighbour.id === channel.id) return
+
+    const timer = window.setTimeout(() => {
+      const streams = neighbour.streams && neighbour.streams.length > 0
+        ? neighbour.streams
+        : (neighbour.stream ? [neighbour.stream] : [])
+      const cached = getCachedWorkingStream(neighbour.id)
+      const ordered = orderStreamsForPlayback(streams, cached?.url)
+      const target = ordered[0]
+      if (!target?.url) return
+      const useProxy = (cached && cached.url === target.url ? cached.useProxy : false) || isMixedContent(target.url)
+      const warmUrl = useProxy ? getProxyStreamUrl(target.url, null, null, [], neighbour.id) : target.url
+      fetch(warmUrl, { method: 'GET', priority: 'low', cache: 'force-cache' } as RequestInit).catch(() => {})
+    }, 1500)
+
+    return () => window.clearTimeout(timer)
+  }, [channel.id, allChannels])
+
   // Cycle within filtered list in the same order shown, with wraparound
   const prevChannel = useMemo(() => {
     if (allChannels.length <= 1) return null
@@ -722,7 +776,8 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
       setIsSlowConnecting(false)
       setHasError(false)
       unmarkStreamBroken(channel.id)
-      cacheWorkingStream(channel.id, rawUrl, isProxied)
+      const playedStream = channelStreamsRef.current[activeStreamIdxRef.current]
+      cacheWorkingStream(channel.id, rawUrl, isProxied, playedStream?.quality)
     }
 
     // Determine target playback URL
@@ -786,7 +841,8 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
     if (Hls.isSupported()) {
       const isLowLatency = localStorage.getItem('sl_low_latency') !== 'false'
       const hls = new Hls({
-        enableWorker: true,
+        // Worker spawn costs 100-300ms on low-end TVs; the parse work is tiny here.
+        enableWorker: false,
         lowLatencyMode: isLowLatency,
         backBufferLength: 15,
         maxBufferLength: 20,
@@ -801,6 +857,8 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
         startFragPrefetch: true,
         startLevel: -1,
         abrEwmaDefaultEstimate: 5_000_000,
+        // Start on the highest level so a good connection never ramps up from 360p.
+        testBandwidth: false,
         manifestLoadingTimeOut: 10000,
         manifestLoadingMaxRetry: 2,
         manifestLoadingRetryDelay: 500,
@@ -820,7 +878,8 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
               }
               const resolvedStream = xhr.getResponseHeader('X-Stream-Resolved')
               if (resolvedStream && resolvedStream !== rawUrl) {
-                cacheWorkingStream(channel.id, resolvedStream, true)
+                const resolved = channelStreamsRef.current.find((s) => s.url === resolvedStream)
+                cacheWorkingStream(channel.id, resolvedStream, true, resolved?.quality)
                 const matchIdx = channelStreamsRef.current.findIndex((s) => s.url === resolvedStream)
                 if (matchIdx >= 0) {
                   activeStreamIdxRef.current = matchIdx
@@ -1158,7 +1217,7 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
           unmarkStreamBroken(channel.id)
           const curStream = channelStreams[activeStreamIdx] || channel.stream
           if (curStream?.url) {
-            cacheWorkingStream(channel.id, curStream.url, isProxied)
+            cacheWorkingStream(channel.id, curStream.url, isProxied, curStream.quality)
           }
         }}
         onClick={() => setShowHud((v) => !v)}

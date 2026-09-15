@@ -152,6 +152,7 @@ const WORKING_TTL_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
 export interface WorkingStreamRecord {
   url: string
   useProxy: boolean
+  quality?: string | null
   timestamp: number
 }
 
@@ -184,17 +185,24 @@ export function getWorkingMapSnapshot(): Record<string, WorkingStreamRecord> {
   return getWorkingMap()
 }
 
-export function getCachedWorkingStream(channelId: string): { url: string; useProxy: boolean } | null {
+export function getCachedWorkingStream(
+  channelId: string
+): { url: string; useProxy: boolean; quality?: string | null } | null {
   const map = getWorkingMap()
   const rec = map[channelId]
   if (!rec) return null
-  return { url: rec.url, useProxy: rec.useProxy }
+  return { url: rec.url, useProxy: rec.useProxy, quality: rec.quality }
 }
 
-export function cacheWorkingStream(channelId: string, url: string, useProxy = false) {
+export function cacheWorkingStream(
+  channelId: string,
+  url: string,
+  useProxy = false,
+  quality?: string | null
+) {
   try {
     const map = getWorkingMap()
-    map[channelId] = { url, useProxy, timestamp: Date.now() }
+    map[channelId] = { url, useProxy, quality: quality ?? null, timestamp: Date.now() }
     localStorage.setItem(WORKING_STREAMS_KEY, JSON.stringify(map))
   } catch {
     // ignore quota
@@ -221,10 +229,14 @@ export interface EdgeStreamCheckResult {
 /**
  * Probes candidate stream URLs via edge node (/api/streams)
  * Returns pre-filtered working and dead stream candidates.
+ *
+ * Each candidate's resolution label is sent alongside its URL so the edge can
+ * rank verified candidates by resolution instead of arrival order.
  */
 export async function fetchEdgeVerifiedStreams(
   channelId: string,
   candidateUrls: string[],
+  qualities?: (string | null | undefined)[],
   timeoutMs = 3000
 ): Promise<EdgeStreamCheckResult | null> {
   if (!candidateUrls || candidateUrls.length === 0) return null
@@ -234,6 +246,12 @@ export async function fetchEdgeVerifiedStreams(
     const params = new URLSearchParams()
     params.set('channelId', channelId)
     params.set('urls', candidateUrls.join(','))
+    if (qualities && qualities.length > 0) {
+      params.set(
+        'qualities',
+        candidateUrls.map((_, i) => qualities[i] ?? '').join(',')
+      )
+    }
 
     const res = await fetch(`/api/streams?${params.toString()}`, {
       method: 'GET',

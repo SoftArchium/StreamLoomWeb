@@ -20,6 +20,17 @@ interface EdgeStreamsPayload {
   timestamp: number
 }
 
+/** Higher score wins. Unknown resolutions rank lowest so named ones always win. */
+function rankResolution(quality: string | null | undefined): number {
+  if (!quality) return 0
+  const q = quality.toLowerCase()
+  if (q.includes('4k') || q.includes('2160') || q.includes('uhd')) return 4
+  if (q.includes('1080') || q.includes('fhd') || q.includes('full hd')) return 3
+  if (q.includes('720') || q.includes('hd')) return 2
+  if (q.includes('576') || q.includes('480') || q.includes('360') || q.includes('sd')) return 1
+  return 0
+}
+
 async function probeStreamEndpoint(url: string, timeoutMs = 2500): Promise<boolean> {
   try {
     const parsed = new URL(url)
@@ -95,7 +106,19 @@ export const onRequest: PagesFunction = async (context) => {
   if (urlParams.length > 0) {
     rawCandidateList.push(...urlParams.map((u) => u.trim()))
   }
+
+  // Resolution labels arrive positionally aligned with the `urls` list.
+  const qualitiesParam = urlObj.searchParams.get('qualities') || ''
+  const qualitiesList = qualitiesParam ? qualitiesParam.split(',') : []
+  const qualityByUrl = new Map<string, string>()
+  rawCandidateList.forEach((u, i) => {
+    const q = qualitiesList[i]?.trim()
+    if (u.length > 0 && q && !qualityByUrl.has(u)) qualityByUrl.set(u, q)
+  })
+
   const candidateUrls = Array.from(new Set(rawCandidateList.filter((u) => u.length > 0)))
+    // Probe highest resolution first: the first working candidate wins.
+    .sort((a, b) => rankResolution(qualityByUrl.get(b)) - rankResolution(qualityByUrl.get(a)))
 
   const cfColo = (request as any).cf?.colo || 'UNKNOWN'
 

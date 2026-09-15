@@ -84,13 +84,20 @@ StreamLoom Web is the browser-native Progressive Web App (PWA) companion to the 
 - Direct TLS upgrade to raw IP streaming servers fails (`ERR_SSL_PROTOCOL_ERROR`) because IP streaming boxes lack valid domain SSL certificates.
 - **Rule**: If `isMixedContent(url)` is true, immediately route the stream via `/api/proxy?url=...` without attempting a direct connection first.
 
+### Resolution-First Candidate Ordering
+- `Stream.quality` holds the resolution label and is the **primary** sort key for candidate selection; protocol/status only break ties.
+- `src/util/resolution.ts` is the single source of ranking truth, shared by `enrich.ts`, `VideoPlayer.tsx` and `functions/api/streams.ts`.
+- **Invariant**: index 0 of `channel.streams` is always the highest resolution candidate, so playback starts at the best available quality.
+- A cached working stream is promoted to index 0 only when no higher resolution candidate exists.
+- `/api/streams` receives `qualities` positionally aligned with `urls` and returns the highest resolution candidate it verified live.
+
 ### Multi-Stream Candidate Shuffling & Caching
 - Many channels have multiple broadcast endpoints in `channel.streams`.
 - `VideoPlayer.tsx` maintains a **6.5-second failover watchdog**:
   1. Try direct connection (if HTTPS) or proxy (if HTTP mixed content).
   2. If direct stalls or errors, failover to edge proxy.
   3. If edge proxy stalls or errors, advance to candidate 2, candidate 3, etc.
-  4. On successful playback (`MANIFEST_PARSED` / `FRAG_BUFFERED`), save candidate URL and proxy flag to `localStorage` (`sl_working_streams_v1`, 7-day TTL).
+  4. On successful playback (`MANIFEST_PARSED` / `FRAG_BUFFERED`), save candidate URL, proxy flag and resolution label to `localStorage` (`sl_working_streams_v1`, 7-day TTL).
   5. The working stream is automatically prioritized at index 0 on subsequent views.
 
 ---
@@ -100,7 +107,7 @@ StreamLoom Web is the browser-native Progressive Web App (PWA) companion to the 
 | Key | Storage | Schema / Type | Purpose |
 |---|---|---|---|
 | `sl_catalogue_v5` | `localStorage` | `{ channels: EnrichedChannel[], categories: Category[], epgIds: string[], source: string, ts: number }` | Offline catalogue cache (1h TTL) |
-| `sl_working_streams_v1` | `localStorage` | `Record<channelId, { url: string, useProxy: boolean, timestamp: number }>` | Verified playable stream cache (7-day TTL) |
+| `sl_working_streams_v1` | `localStorage` | `Record<channelId, { url: string, useProxy: boolean, quality: string \| null, timestamp: number }>` | Verified playable stream cache with resolution label (7-day TTL) |
 | `sl_broken_streams_v2` | `localStorage` | `Record<channelId, { timestamp: number }>` | Broken channel registry for auto-skip (24h TTL) |
 | `sl_favourites` | `localStorage` | `string[]` | Pinned channel IDs |
 | `sl_recent_v1` | `localStorage` | `string[]` | Recent channels list (capped at 20) |
