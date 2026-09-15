@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from 'react'
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import type { EnrichedChannel } from '../hooks/useChannels'
 import type { EpgProgram } from '../api/types'
@@ -12,6 +12,7 @@ interface Props {
 }
 
 const PIXELS_PER_MINUTE = 4
+const EPG_BATCH_SIZE = 30
 
 function formatTime(iso: string) {
   return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
@@ -36,10 +37,30 @@ export function EpgGuide({ channels, epgChannelIds }: Props) {
   const [epgMap, setEpgMap] = useState<Map<string, EpgProgram[]>>(new Map())
   const [loadedCount, setLoadedCount] = useState(0)
   const timelineRef = useRef<HTMLDivElement>(null)
+  const sentinelRef = useRef<HTMLDivElement>(null)
+  const [expandedCount, setExpandedCount] = useState(0)
 
-  const VISIBLE = 30
-  const visibleChannels = useMemo(() => guideChannels.slice(0, VISIBLE), [guideChannels])
+  // Reset pagination during render when the underlying guide channel set changes
+  const guideKey = useMemo(() => guideChannels.map((c) => c.id).join(','), [guideChannels])
+  const [prevGuideKey, setPrevGuideKey] = useState(guideKey)
+  if (prevGuideKey !== guideKey) {
+    setPrevGuideKey(guideKey)
+    setExpandedCount(0)
+    setLoadedCount(0)
+    setEpgMap(new Map())
+  }
+
+  const visibleCount = Math.min(EPG_BATCH_SIZE + expandedCount, guideChannels.length)
+  const visibleChannels = useMemo(
+    () => guideChannels.slice(0, visibleCount),
+    [guideChannels, visibleCount]
+  )
+  const hasMore = visibleChannels.length < guideChannels.length
   const channelIdsKey = useMemo(() => visibleChannels.map((c) => c.id).join(','), [visibleChannels])
+
+  const loadMore = useCallback(() => {
+    setExpandedCount((prev) => Math.min(prev + EPG_BATCH_SIZE, guideChannels.length))
+  }, [guideChannels.length])
 
   // Fetch EPG for channels
   useEffect(() => {
@@ -70,7 +91,7 @@ export function EpgGuide({ channels, epgChannelIds }: Props) {
           }
           return next
         })
-        setLoadedCount((n) => Math.min(n + batchSize, visibleChannels.length))
+        setLoadedCount((n) => n + batch.length)
       }
     }
 
@@ -88,6 +109,22 @@ export function EpgGuide({ channels, epgChannelIds }: Props) {
     const offset = nowMinutes() * PIXELS_PER_MINUTE - 120
     timelineRef.current?.scrollTo({ left: Math.max(0, offset), behavior: 'smooth' })
   }, [])
+
+  // Auto-load next batch of channels as the sentinel scrolls into view
+  useEffect(() => {
+    const sentinel = sentinelRef.current
+    if (!sentinel || !hasMore) return
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) loadMore()
+      },
+      { rootMargin: '300px' }
+    )
+
+    observer.observe(sentinel)
+    return () => observer.disconnect()
+  }, [hasMore, loadMore, visibleCount])
 
   const hours = Array.from({ length: 24 }, (_, h) => h)
   const [now] = useState(() => nowMinutes())
@@ -213,6 +250,20 @@ export function EpgGuide({ channels, epgChannelIds }: Props) {
             </div>
           )
         })}
+
+        {visibleChannels.length === 0 && (
+          <div className="epg-guide__empty">No channels with schedule data available</div>
+        )}
+
+        {hasMore && (
+          <div className="epg-guide__load-more">
+            <button className="epg-guide__load-more__btn" onClick={loadMore}>
+              Load More Channels ({guideChannels.length - visibleChannels.length} remaining)
+            </button>
+          </div>
+        )}
+
+        <div ref={sentinelRef} className="epg-guide__sentinel" aria-hidden="true" />
       </div>
     </div>
   )
