@@ -65,6 +65,33 @@ VITE_UPSTASH_REDIS_REST_READONLY_TOKEN=your_upstash_readonly_token
 
 Both are required — without them the app has no catalogue to read.
 
+### Build-time enforcement
+
+The build refuses to run without both variables:
+
+```bash
+$ npm run build
+StreamLoom build aborted: required environment variables are missing.
+  - Upstash Redis REST URL (set any of: VITE_UPSTASH_REDIS_REST_URL, ...)
+  - Upstash Redis read-only token (set any of: VITE_UPSTASH_REDIS_REST_READONLY_TOKEN, ...)
+```
+
+This exists because Vite inlines `VITE_*` values **at build time**. A missing
+variable does not break the build; it silently produces a bundle that renders no
+channels and shows "Upstash Redis is not configured". Failing loudly at build
+time turns a confusing dead deployment into an obvious error.
+
+The check reads either `VITE_`-prefixed or bare names, matching the fallback
+ordering in `src/api/redis.ts`, and prefers the shell environment over `.env`.
+
+To build a bundle without live data on purpose (a lint or type-check step),
+bypass it explicitly:
+
+```bash
+SKIP_ENV_CHECK=1 npm run build
+```
+
+
 ### Optional: TV Guide translation
 
 The Guide's `English` toggle translates programme titles. Point it at a
@@ -100,3 +127,33 @@ StreamLoom Web is pre-configured for Cloudflare Pages:
 - **Node version:** `>= 20`
 - SPA routing handled automatically via `public/_redirects` (`/* /index.html 200`)
 - Edge caching and security headers defined in `public/_headers`
+
+### Environment variables must be set for BOTH scopes
+
+Cloudflare Pages keeps **two separate variable scopes: Production and Preview**.
+Preview deployments — every branch build and pull request — **do not inherit
+production variables**. Setting a variable only under Production means every
+branch deploy builds without it, and the guard above will stop the build.
+
+Add each variable to **both** scopes:
+
+```
+Dashboard -> Workers & Pages -> your project -> Settings
+  -> Variables and Secrets -> Add
+  -> choose the Production environment, add the variable
+  -> repeat, choosing the Preview environment
+```
+
+Both required variables:
+
+| Variable | Where to find it |
+|---|---|
+| `VITE_UPSTASH_REDIS_REST_URL` | Upstash console -> Redis -> REST API -> Endpoint |
+| `VITE_UPSTASH_REDIS_REST_READONLY_TOKEN` | Upstash console -> Redis -> REST API -> Read Only Token |
+
+These are inlined into the client bundle, so anyone can read them from the
+deployed JavaScript. Use the **read-only** token, never a read-write one.
+
+No variables need to be set for `netlify.toml`; that file only defines build and
+redirect rules.
+
