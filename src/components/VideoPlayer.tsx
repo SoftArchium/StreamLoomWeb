@@ -5,7 +5,8 @@ import type { EnrichedChannel } from '../hooks/useChannels'
 import type { EpgProgram } from '../api/types'
 import { useEpg, useFavourites, useRecent } from '../hooks/useChannels'
 import { formatCountryDisplay } from '../util/country'
-import { LOGO_SIZE, logoUrl, handleLogoError } from '../util/logo'
+import { LOGO_SIZE, logoUrl, handleLogoError, logoDataAttrs } from '../util/logo'
+import { onIconResolved, scheduleIconBackfill } from '../util/iconResolver'
 import { orderStreamsForPlayback, rankResolution } from '../util/resolution'
 import {
   getProxyStreamUrl,
@@ -48,6 +49,18 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
   const navigate = useNavigate()
   const { programs } = useEpg(channel.id)
   const { isFavourite, toggle } = useFavourites()
+  // Bumped when a backfilled icon lands, so the HUD logo swaps in without
+  // waiting for an unrelated re-render.
+  const [, setIconTick] = useState(0)
+
+  // The watched channel is the highest-value icon to resolve, but only when it
+  // has no icon at all — a CDN icon that 404s is queued from onError instead.
+  useEffect(() => {
+    if (!channel.logo?.trim()) scheduleIconBackfill(channel.id, channel.name, channel.country)
+    return onIconResolved((resolvedId) => {
+      if (resolvedId === channel.id) setIconTick((t) => t + 1)
+    })
+  }, [channel.id, channel.name, channel.country, channel.logo])
   const { addRecent } = useRecent()
 
   const [isPlaying, setIsPlaying] = useState(true)
@@ -1350,15 +1363,16 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
         </button>
 
         <div className="player__info">
-          {logoUrl(channel.logo) && (
+          {logoUrl(channel.logo, channel.id) && (
             <img
-              src={logoUrl(channel.logo)!}
+              src={logoUrl(channel.logo, channel.id)!}
               alt={channel.name}
               width={LOGO_SIZE}
               height={LOGO_SIZE}
               decoding="async"
               onError={handleLogoError}
               className="player__logo"
+              {...logoDataAttrs(channel.id, channel.name, channel.country)}
             />
           )}
           <div className="player__info-text">
@@ -1610,9 +1624,9 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
                   switchChannelCleanly(c)
                 }}
               >
-                {logoUrl(c.logo) ? (
+                {logoUrl(c.logo, c.id) ? (
                   <img
-                    src={logoUrl(c.logo)!}
+                    src={logoUrl(c.logo, c.id)!}
                     alt={c.name}
                     width={LOGO_SIZE}
                     height={LOGO_SIZE}
@@ -1620,6 +1634,7 @@ export function VideoPlayer({ channel, allChannels, returnTo = '/' }: Props) {
                     decoding="async"
                     onError={handleLogoError}
                     className="player__drawer-logo"
+                    {...logoDataAttrs(c.id, c.name, c.country)}
                   />
                 ) : (
                   <div className="player__drawer-initials">{c.name.slice(0, 2).toUpperCase()}</div>
