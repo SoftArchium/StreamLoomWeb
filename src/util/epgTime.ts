@@ -34,24 +34,47 @@ export interface GuideWindow {
   width: number
   /** Minutes from origin to the current time. */
   nowOffset: number
+  /** True when the anchor was pulled back because the feed is stale. */
+  stale: boolean
+  /** Minutes from origin to the anchor (the "now" marker unless stale). */
+  anchorOffset: number
 }
 
 /**
- * Builds the visible time window around `now`.
+ * Builds the visible time window.
  *
- * The origin is floored to a 30-minute boundary so hour labels land on whole
- * hours and the grid does not jitter between renders.
+ * The grid is anchored `leadMinutes` (default `GRID_BACK_MINUTES`) before
+ * `anchor` and runs `spanOverride` (default `GRID_BACK_MINUTES +
+ * GRID_FORWARD_MINUTES`) past that origin, which puts the anchor on screen with
+ * a little history behind it.
+ *
+ * A stale feed overrides both: it starts at the data and spans forward from
+ * there, because there is no "now" to sit behind.
  */
-export function buildGuideWindow(now: Date): GuideWindow {
+export function buildGuideWindow(
+  anchor: Date,
+  stale = false,
+  spanOverride?: number,
+  leadMinutes?: number,
+): GuideWindow {
   const step = 30 * 60 * 1000
-  const rawOrigin = now.getTime() - GRID_BACK_MINUTES * 60 * 1000
-  const origin = Math.floor(rawOrigin / step) * step
-  const span = GRID_BACK_MINUTES + GRID_FORWARD_MINUTES
+  const lead = leadMinutes ?? GRID_BACK_MINUTES
+  const rawOrigin = anchor.getTime() - lead * 60 * 1000
+  // Stale windows anchor exactly on a programme boundary; live windows are
+  // floored to the half hour so the hour ruler lands on whole labels.
+  const origin = stale ? rawOrigin : Math.floor(rawOrigin / step) * step
+  const span =
+    spanOverride !== undefined
+      ? Math.ceil(spanOverride / 30) * 30
+      : lead + GRID_FORWARD_MINUTES
+  const anchorOffset = (anchor.getTime() - origin) / 60_000
   return {
     origin,
     span,
     width: span * PIXELS_PER_MINUTE,
-    nowOffset: (now.getTime() - origin) / 60_000,
+    nowOffset: anchorOffset,
+    stale,
+    anchorOffset,
   }
 }
 
