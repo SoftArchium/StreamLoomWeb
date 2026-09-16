@@ -11,19 +11,33 @@ import type { Page } from '@playwright/test'
  * that blanked the page — all passed a build and an SSR check.
  */
 
-/** Opens the guide and waits until schedules have produced programme boxes. */
+/**
+ * Opens the guide and waits until schedules have produced programme boxes.
+ *
+ * Schedules arrive in waves, so waiting for the *first* box is not enough: the
+ * grid is only meaningfully loaded once its visible rows have stopped showing
+ * the no-schedule placeholder. Tests assert against a settled grid, not a
+ * half-populated one.
+ */
 async function openGuide(page: Page) {
   await page.goto('/guide')
   await expect(page.locator('.epg-guide__grid')).toBeVisible({ timeout: 90_000 })
   await expect(page.locator('.epg-guide__row').first()).toBeVisible({ timeout: 90_000 })
-  // Rows render first, then their schedules arrive in waves. Poll the DOM rather
-  // than waiting on a specific box, which may sit just outside the viewport.
+  // Poll the DOM rather than waiting on a specific box, which may sit just
+  // outside the viewport.
   await expect
     .poll(
       () => page.evaluate(() => document.querySelectorAll('.epg-guide__program').length),
       { timeout: 90_000, message: 'programme boxes never rendered' },
     )
     .toBeGreaterThan(0)
+  // Then wait for the waves to land, so rows are not measured mid-load.
+  await expect
+    .poll(
+      () => page.evaluate(() => document.querySelectorAll('.epg-guide__no-prog').length),
+      { timeout: 90_000, message: 'rows never finished loading their schedules' },
+    )
+    .toBe(0)
 }
 
 /** Counts rows, programme boxes and empty rows in the current view. */
@@ -36,6 +50,11 @@ function guideStats(page: Page) {
   }))
 }
 
+/** The guide's channel count, which every filter must move. */
+function channelCount(page: Page) {
+  return page.locator('.epg-toolbar__count')
+}
+
 test.describe('TV guide', () => {
   test('renders the full grid without console errors', async ({ page }) => {
     const errors: string[] = []
@@ -46,7 +65,7 @@ test.describe('TV guide', () => {
 
     await openGuide(page)
 
-    await expect(page.locator('.epg-toolbar__search-input')).toBeVisible()
+    await expect(page.locator('.search-bar__input')).toBeVisible()
     await expect(page.locator('.epg-guide__timeline')).toBeVisible()
     await expect(page.locator('.epg-guide__now-flag')).toBeAttached()
 
@@ -233,10 +252,10 @@ test.describe('TV guide', () => {
 
   test('search narrows the guide and clearing restores it', async ({ page }) => {
     await openGuide(page)
-    const count = page.locator('.epg-toolbar__count')
+    const count = channelCount(page)
     const before = await count.innerText()
 
-    await page.locator('.epg-toolbar__search-input').fill('bbc')
+    await page.locator('.search-bar__input').fill('bbc')
     await page.waitForTimeout(1500)
     await expect(count).not.toHaveText(before)
     await expect(page.locator('.epg-guide__row').first()).toBeVisible()
@@ -244,7 +263,7 @@ test.describe('TV guide', () => {
     const stats = await guideStats(page)
     expect(stats.programs, 'filtered view still renders programmes').toBeGreaterThan(0)
 
-    await page.locator('.epg-toolbar__clear').click()
+    await page.locator('.search-bar__input').fill('')
     await page.waitForTimeout(1500)
     await expect(count).toHaveText(before)
   })
@@ -264,6 +283,125 @@ test.describe('TV guide', () => {
     await expect(page.locator('.epg-guide__row').first()).toBeVisible()
     const stats = await guideStats(page)
     expect(stats.programs, 'programmes survive the toggle').toBeGreaterThan(0)
+  })
+})
+
+/**
+ * The guide must offer the same filters as the Home screen: search, category,
+ * country, language, quality and favourites. Category was the one missing,
+ * which is why these tests assert the facet is present and actually narrows.
+ */
+test.describe('TV guide filters match the home screen', () => {
+  test('renders every home-screen filter facet', async ({ page }) => {
+    await openGuide(page)
+
+    // Search is the same SearchBar component Home mounts.
+    await expect(page.locator('.search-bar__input')).toBeVisible()
+
+    // Favourites pill, quality/country/language selects.
+    await expect(page.locator('.home-quick-filters .filter-pill')).toBeVisible()
+    await expect(page.locator('select[aria-label="Filter by quality"]')).toBeVisible()
+    await expect(page.locator('select[aria-label="Filter by country"]')).toBeVisible()
+
+    // Category facet: the missing one. It renders as the scrollable pill track.
+    const pills = page.locator('.home-categories-scroll .filter-pill')
+    await expect(pills.first()).toBeVisible()
+    expect(await pills.count(), 'category track has options').toBeGreaterThan(2)
+
+    // Priority categories lead the track, exactly as on Home.
+    const firstTwo = await pills.nth(0).innerText()
+    expect(firstTwo.length, 'category pill is labelled').toBeGreaterThan(0)
+  })
+
+  test('the filter sheet opens and exposes every facet', async ({ page }) => {
+    await openGuide(page)
+
+    await page.locator('.home-filter-btn').click()
+    const sheet = page.locator('.filter-sheet')
+    await expect(sheet).toBeVisible()
+
+    // The same FilterSheet component Home uses, with the same sections.
+    await expect(sheet.locator('.filter-sheet__title')).toHaveText('Filters')
+    await expect(sheet.getByText('Resolution / Quality')).toBeVisible()
+    await expect(sheet.getByText('Categories')).toBeVisible()
+    await expect(sheet.getByText(/Country \(/)).toBeVisible()
+    await expect(sheet.locator('.filter-sheet__toggle-row')).toBeVisible()
+
+    await sheet.locator('.filter-sheet__close-btn').click()
+    await expect(sheet).toBeHidden()
+  })
+
+  test('selecting a category narrows the guide and still renders rows', async ({ page }) => {
+    await openGuide(page)
+    const count = channelCount(page)
+    const before = await count.innerText()
+
+    // Pick the first category pill, whatever the catalogue orders first.
+    await page.locator('.home-categories-scroll .filter-pill').first().click()
+    await page.waitForTimeout(2500)
+
+    await expect(count).not.toHaveText(before)
+    await expect(page.locator('.home-categories-scroll .filter-pill--active')).toHaveCount(1)
+
+    // A removable chip is the visible proof the filter is applied.
+    await expect(page.locator('.home-active-chips .active-chip').first()).toBeVisible()
+
+    const stats = await guideStats(page)
+    expect(stats.programs, 'category-filtered view still renders programmes').toBeGreaterThan(0)
+    expect(stats.emptyRows, 'no empty rows under a category filter').toBe(0)
+  })
+
+  test('clearing all filters restores the full channel count', async ({ page }) => {
+    await openGuide(page)
+    const count = channelCount(page)
+    const before = await count.innerText()
+
+    await page.locator('.home-categories-scroll .filter-pill').first().click()
+    await page.waitForTimeout(2000)
+    await expect(count).not.toHaveText(before)
+
+    await page.locator('.home-active-chips .active-chip__clear-all').click()
+    await page.waitForTimeout(2000)
+    await expect(count).toHaveText(before)
+  })
+
+  test('country, quality and favourites filters all narrow the guide', async ({ page }) => {
+    await openGuide(page)
+    const count = channelCount(page)
+    const before = await count.innerText()
+
+    // Country: pick the first real country in the select.
+    const country = page.locator('select[aria-label="Filter by country"]')
+    const options = await country.locator('option').all()
+    expect(options.length, 'country select lists countries').toBeGreaterThan(1)
+    await country.selectOption({ index: 1 })
+    await page.waitForTimeout(2000)
+    await expect(count).not.toHaveText(before)
+
+    await page.locator('.home-active-chips .active-chip__clear-all').click()
+    await page.waitForTimeout(2000)
+    await expect(count).toHaveText(before)
+
+    // Quality: pick the first non-default bucket.
+    const quality = page.locator('select[aria-label="Filter by quality"]')
+    const qualityOptions = await quality.locator('option').all()
+    expect(qualityOptions.length, 'quality select lists buckets').toBeGreaterThan(1)
+    await quality.selectOption({ index: 1 })
+    await page.waitForTimeout(2000)
+    await expect(count).not.toHaveText(before)
+
+    // Favourites: narrowing to an empty set must not leave the grid broken.
+    await page.locator('.home-active-chips .active-chip__clear-all').click()
+    await page.waitForTimeout(1500)
+    await page.locator('.home-quick-filters .filter-pill').first().click()
+    await page.waitForTimeout(2000)
+
+    // With no favourites, the guide must show its empty state rather than
+    // rendering a broken or blank grid.
+    await expect(page.locator('.epg-guide__empty')).toBeVisible()
+    await expect(page.locator('.epg-guide__empty-title')).toHaveText(
+      'No channels match these filters',
+    )
   })
 })
 

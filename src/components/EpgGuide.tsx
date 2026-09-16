@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import type { EnrichedChannel, EpgProgram } from '../api/types'
+import type { Category, EnrichedChannel, EpgProgram } from '../api/types'
 import { fetchEpgFromRedis } from '../api/redis'
 import {
   PIXELS_PER_MINUTE,
@@ -24,6 +24,7 @@ import './EpgGuide.css'
 
 interface Props {
   channels: EnrichedChannel[]
+  categories: Category[]
   epgChannelIds: Set<string>
   filters: GuideFilters
 }
@@ -178,7 +179,7 @@ function guideMetricsFor(viewportWidth: number): { sidebar: number; rowHeight: n
   return { sidebar: SIDEBAR_WIDTH, rowHeight: ROW_HEIGHT }
 }
 
-export function EpgGuide({ channels, epgChannelIds, filters }: Props) {
+export function EpgGuide({ channels, categories, epgChannelIds, filters }: Props) {
   const navigate = useNavigate()
   const viewportRef = useRef<HTMLDivElement>(null)
   const rafRef = useRef(0)
@@ -350,6 +351,7 @@ export function EpgGuide({ channels, epgChannelIds, filters }: Props) {
       <EpgToolbar
         filters={filters}
         channels={channels}
+        categories={categories}
         epgChannelIds={epgChannelIds}
         resultCount={guideChannels.length}
         translate={translate}

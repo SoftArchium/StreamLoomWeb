@@ -1,17 +1,23 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import type { EnrichedChannel } from '../api/types'
-import { formatCountryDisplay } from '../util/country'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { Category, EnrichedChannel } from '../api/types'
+import { formatCountryDisplay, getCountryFlag, getCountryName } from '../util/country'
 import { getLanguageName } from '../util/language'
+import type { LanguageOption } from '../util/language'
 import {
   activeFilterCount,
   facetCounts,
   hasActiveFilters,
 } from '../util/epgFilter'
 import type { GuideFilters } from '../util/epgFilter'
+import { FilterSheet } from './FilterSheet'
+import { SearchBar } from './SearchBar'
+import '../pages/Home.css'
+import './FilterSheet.css'
 
 interface Props {
   filters: GuideFilters
   channels: EnrichedChannel[]
+  categories: Category[]
   epgChannelIds: Set<string>
   resultCount: number
   translate: boolean
@@ -19,15 +25,32 @@ interface Props {
   onScrollToNow: () => void
 }
 
+/** Quality buckets, identical to the Home screen's resolution filter. */
+const QUALITY_OPTIONS = ['4K', 'FHD (1080p)', 'HD (720p)', 'SD']
+
+/** Categories pinned to the front of the track, as on the Home screen. */
+const PRIORITY_CATEGORIES = ['music', 'movies', 'cartoons', 'comedy', 'news', 'sports']
+
+const CATEGORY_ICONS: Record<string, string> = {
+  music: '🎵', movies: '🎬', cartoons: '🦄', kids: '🧸', comedy: '😂', news: '📰',
+  sports: '⚽', documentary: '🌍', entertainment: '🍿', lifestyle: '✨', general: '📺',
+  series: '🎞️', auto: '🏎️', science: '🔬', travel: '✈️', cooking: '🍳',
+  family: '👨‍👩‍👧', classic: '📻', business: '💼',
+}
+
 /**
- * Search + facet bar for the TV guide.
+ * Filter bar for the TV guide.
  *
- * Counts come from `facetCounts`, which evaluates each facet against all *other*
- * active filters, so a dropdown never collapses to its own selection.
+ * Mirrors the Home screen exactly: the same `SearchBar`, the same `FilterSheet`
+ * bottom sheet, the same active-filter chips and the same quick filter row with
+ * its scrollable category track. Both surfaces are fed by `facetCounts`, which
+ * evaluates each facet against every *other* active filter so a control never
+ * collapses to its own selection.
  */
 export function EpgToolbar({
   filters,
   channels,
+  categories,
   epgChannelIds,
   resultCount,
   translate,
@@ -38,171 +61,276 @@ export function EpgToolbar({
     () => channels.filter((ch) => epgChannelIds.has(ch.id) && ch.stream),
     [channels, epgChannelIds],
   )
-  const [open, setOpen] = useState(false)
-  const searchRef = useRef<HTMLInputElement>(null)
-
-  // "/" focuses search, Escape clears it — same affordance as the Home search.
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      const target = e.target as HTMLElement | null
-      const typing = target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)
-      if (e.key === '/' && !typing) {
-        e.preventDefault()
-        searchRef.current?.focus()
-      } else if (e.key === 'Escape' && document.activeElement === searchRef.current) {
-        searchRef.current?.blur()
-        filters.onSearch('')
-      }
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [filters])
+  const [sheetOpen, setSheetOpen] = useState(false)
+  const categoriesScrollRef = useRef<HTMLDivElement>(null)
 
   const countries = useMemo(() => {
     const counts = facetCounts(scope, filters, 'country')
     return [...counts.keys()]
-      .map((code) => ({ code, count: counts.get(code) ?? 0, label: formatCountryDisplay(code) }))
-      .sort((a, b) => a.label.localeCompare(b.label))
+      .map((code) => ({
+        code,
+        flag: getCountryFlag(code),
+        name: getCountryName(code),
+        count: counts.get(code) ?? 0,
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name))
   }, [scope, filters])
 
-  const languages = useMemo(() => {
+  const categoryOptions = useMemo(() => {
+    const counts = facetCounts(scope, filters, 'category')
+    return categories
+      .filter((cat) => (counts.get(cat.id) ?? 0) > 0)
+      .map((cat) => ({
+        id: cat.id,
+        name: cat.name,
+        count: counts.get(cat.id) ?? 0,
+        icon: CATEGORY_ICONS[cat.id.toLowerCase()] ?? '📺',
+      }))
+      .sort((a, b) => {
+        const ai = PRIORITY_CATEGORIES.indexOf(a.id.toLowerCase())
+        const bi = PRIORITY_CATEGORIES.indexOf(b.id.toLowerCase())
+        if (ai !== -1 && bi !== -1) return ai - bi
+        if (ai !== -1) return -1
+        if (bi !== -1) return 1
+        return a.name.localeCompare(b.name)
+      })
+  }, [categories, scope, filters])
+
+  const languages = useMemo<LanguageOption[]>(() => {
     const counts = facetCounts(scope, filters, 'language')
     return [...counts.keys()]
-      .map((code) => ({ code, count: counts.get(code) ?? 0, label: getLanguageName(code) }))
-      .sort((a, b) => a.label.localeCompare(b.label))
+      .map((code) => ({ code, name: getLanguageName(code), count: counts.get(code) ?? 0 }))
+      .sort((a, b) => a.name.localeCompare(b.name))
   }, [scope, filters])
 
+  // Only offer resolutions that exist in the current subset, like Home does.
+  const qualities = useMemo(() => {
+    const counts = facetCounts(scope, filters, 'quality')
+    return ['All Quality', ...QUALITY_OPTIONS.filter((q) => (counts.get(q) ?? 0) > 0)]
+  }, [scope, filters])
+
+  // Wheel over the category track scrolls it horizontally, as on Home.
+  useEffect(() => {
+    const el = categoriesScrollRef.current
+    if (!el) return
+    function onWheel(e: WheelEvent) {
+      const track = categoriesScrollRef.current
+      if (!track || e.deltaY === 0 || track.scrollWidth <= track.clientWidth) return
+      e.preventDefault()
+      track.scrollLeft += e.deltaY
+    }
+    el.addEventListener('wheel', onWheel, { passive: false })
+    return () => el.removeEventListener('wheel', onWheel)
+  }, [])
+
+  const onSearch = useCallback((v: string) => filters.onSearch(v), [filters])
   const count = activeFilterCount(filters)
   const isFiltered = hasActiveFilters(filters)
+  const selectedCategory = filters.category
+    ? categoryOptions.find((c) => c.id === filters.category)
+    : undefined
+
 
   return (
-    <div className="epg-toolbar">
-      <div className="epg-toolbar__row">
-        <div className="epg-toolbar__search">
-          <span className="epg-toolbar__search-icon" aria-hidden="true">⌕</span>
-          <input
-            ref={searchRef}
-            type="search"
-            className="epg-toolbar__search-input"
-            placeholder="Search channels…"
-            value={filters.search}
-            onChange={(e) => filters.onSearch(e.target.value)}
-            autoComplete="off"
-            spellCheck={false}
-            aria-label="Search guide channels"
-          />
-          {filters.search && (
-            <button
-              type="button"
-              className="epg-toolbar__clear"
-              onClick={() => filters.onSearch('')}
-              aria-label="Clear search"
-            >
-              ✕
-            </button>
-          )}
-          <kbd className="epg-toolbar__kbd">/</kbd>
+    <>
+      <div className="epg-toolbar">
+        <div className="epg-toolbar__row">
+          <div className="epg-toolbar__search-slot">
+            <SearchBar
+              value={filters.search}
+              onChange={onSearch}
+              resultCount={filters.search.trim() ? resultCount : undefined}
+            />
+          </div>
+
+          <button
+            type="button"
+            className={`home-filter-btn${count > 0 ? ' home-filter-btn--active' : ''}`}
+            onClick={() => setSheetOpen(true)}
+            aria-label="Open filter settings"
+            title="Filter channels by country, category, resolution"
+          >
+            <span>🎛️ Filters</span>
+            {count > 0 && <span className="home-filter-btn__badge">{count}</span>}
+          </button>
+
+          <button
+            type="button"
+            className={`epg-toolbar__btn${translate ? ' epg-toolbar__btn--active' : ''}`}
+            onClick={onToggleTranslate}
+            aria-pressed={translate}
+            title="Translate programme titles to English"
+          >
+            <span aria-hidden="true">🌐</span>
+            {translate ? 'English' : 'Original'}
+          </button>
+
+          <button type="button" className="epg-toolbar__btn" onClick={onScrollToNow}>
+            <span aria-hidden="true">◉</span>
+            Now
+          </button>
+
+          <span className="epg-toolbar__count">
+            {resultCount.toLocaleString()} {resultCount === 1 ? 'channel' : 'channels'}
+          </span>
         </div>
 
-        <button
-          type="button"
-          className={`epg-toolbar__btn${open ? ' epg-toolbar__btn--active' : ''}`}
-          onClick={() => setOpen((v) => !v)}
-          aria-expanded={open}
-        >
-          <span aria-hidden="true">☰</span>
-          Filters
-          {count > 0 && <span className="epg-toolbar__badge">{count}</span>}
-        </button>
-
-        <button
-          type="button"
-          className={`epg-toolbar__btn${translate ? ' epg-toolbar__btn--active' : ''}`}
-          onClick={onToggleTranslate}
-          aria-pressed={translate}
-          title="Translate programme titles to English"
-        >
-          <span aria-hidden="true">🌐</span>
-          {translate ? 'English' : 'Original'}
-        </button>
-
-        <button type="button" className="epg-toolbar__btn" onClick={onScrollToNow}>
-          <span aria-hidden="true">◉</span>
-          Now
-        </button>
-
-        <span className="epg-toolbar__count">
-          {resultCount.toLocaleString()} {resultCount === 1 ? 'channel' : 'channels'}
-        </span>
-      </div>
-
-      <div className={`epg-toolbar__facets${open ? ' epg-toolbar__facets--open' : ''}`}>
-        <FacetSelect
-          label="Country"
-          value={filters.country}
-          emptyLabel={`All countries (${countries.length})`}
-          options={countries.map((c) => ({ value: c.code, label: `${c.label} (${c.count})` }))}
-          onChange={filters.onCountry}
-        />
-        <FacetSelect
-          label="Language"
-          value={filters.language}
-          emptyLabel={`All languages (${languages.length})`}
-          options={languages.map((l) => ({ value: l.code, label: `${l.label} (${l.count})` }))}
-          onChange={filters.onLanguage}
-        />
-        <FacetSelect
-          label="Quality"
-          value={filters.quality === 'All Quality' ? null : filters.quality}
-          emptyLabel="All quality"
-          options={['4K', 'FHD (1080p)', 'HD (720p)', 'SD'].map((q) => ({ value: q, label: q }))}
-          onChange={(v) => filters.onQuality(v ?? 'All Quality')}
-        />
-        <button
-          type="button"
-          className={`epg-toolbar__chip${filters.favOnly ? ' epg-toolbar__chip--active' : ''}`}
-          onClick={filters.onToggleFav}
-          aria-pressed={filters.favOnly}
-        >
-          ♥ Favourites{filters.favouriteIds.size > 0 ? ` (${filters.favouriteIds.size})` : ''}
-        </button>
         {isFiltered && (
-          <button type="button" className="epg-toolbar__reset" onClick={filters.onClear}>
-            Reset
-          </button>
+          <div className="home-active-chips">
+            {filters.favOnly && (
+              <button className="active-chip" onClick={filters.onToggleFav}>
+                <span>♥ Favourites</span>
+                <span className="active-chip__remove">✕</span>
+              </button>
+            )}
+            {filters.country && (
+              <button className="active-chip" onClick={() => filters.onCountry(null)}>
+                <span>{formatCountryDisplay(filters.country)}</span>
+                <span className="active-chip__remove">✕</span>
+              </button>
+            )}
+            {selectedCategory && (
+              <button className="active-chip" onClick={() => filters.onCategory(null)}>
+                <span>
+                  {selectedCategory.icon} {selectedCategory.name}
+                </span>
+                <span className="active-chip__remove">✕</span>
+              </button>
+            )}
+            {filters.language && (
+              <button className="active-chip" onClick={() => filters.onLanguage(null)}>
+                <span>🌐 {getLanguageName(filters.language)}</span>
+                <span className="active-chip__remove">✕</span>
+              </button>
+            )}
+            {filters.quality !== 'All Quality' && (
+              <button className="active-chip" onClick={() => filters.onQuality('All Quality')}>
+                <span>📺 {filters.quality}</span>
+                <span className="active-chip__remove">✕</span>
+              </button>
+            )}
+            <button className="active-chip__clear-all" onClick={filters.onClear}>
+              Clear all
+            </button>
+          </div>
         )}
+
+        <div className="home-filters-row">
+          <div className="home-quick-filters">
+            <button
+              className={`filter-pill${filters.favOnly ? ' filter-pill--active' : ''}`}
+              onClick={filters.onToggleFav}
+              title="Filter favourites"
+            >
+              <span>♥ Favourites</span>
+              {filters.favouriteIds.size > 0 && (
+                <span className="filter-pill__count">{filters.favouriteIds.size}</span>
+              )}
+            </button>
+
+            <div className="filter-select-wrap">
+              <select
+                className={`filter-select${filters.quality !== 'All Quality' ? ' filter-select--active' : ''}`}
+                value={filters.quality}
+                onChange={(e) => filters.onQuality(e.target.value)}
+                aria-label="Filter by quality"
+              >
+                {qualities.map((q) => (
+                  <option key={q} value={q}>
+                    📺 {q}
+                  </option>
+                ))}
+              </select>
+              <span className="filter-select-arrow">▼</span>
+            </div>
+
+            <div className="filter-select-wrap">
+              <select
+                className={`filter-select${filters.country ? ' filter-select--active' : ''}`}
+                value={filters.country ?? ''}
+                onChange={(e) => filters.onCountry(e.target.value || null)}
+                aria-label="Filter by country"
+              >
+                <option value="">🌍 All Countries ({countries.length})</option>
+                {countries.map((c) => (
+                  <option key={c.code} value={c.code}>
+                    {c.flag} {c.name} ({c.count})
+                  </option>
+                ))}
+              </select>
+              <span className="filter-select-arrow">▼</span>
+            </div>
+
+            {languages.length > 0 && (
+              <div className="filter-select-wrap">
+                <select
+                  className={`filter-select${filters.language ? ' filter-select--active' : ''}`}
+                  value={filters.language ?? ''}
+                  onChange={(e) => filters.onLanguage(e.target.value || null)}
+                  aria-label="Filter by language"
+                >
+                  <option value="">🌐 All Languages ({languages.length})</option>
+                  {languages.map((l) => (
+                    <option key={l.code} value={l.code}>
+                      {l.name} ({l.count})
+                    </option>
+                  ))}
+                </select>
+                <span className="filter-select-arrow">▼</span>
+              </div>
+            )}
+          </div>
+
+          <div className="home-categories-scroll-wrap">
+            <div className="home-categories-scroll" ref={categoriesScrollRef}>
+              {categoryOptions.length === 0 ? (
+                <span className="epg-toolbar__hint">No categories in this view</span>
+              ) : (
+                categoryOptions.map((cat) => {
+                  const isActive = filters.category === cat.id
+                  return (
+                    <button
+                      key={cat.id}
+                      className={`filter-pill${isActive ? ' filter-pill--active' : ''}`}
+                      onClick={() => filters.onCategory(isActive ? null : cat.id)}
+                      title={`${cat.name} (${cat.count} channels)`}
+                    >
+                      <span className="filter-pill__icon">{cat.icon}</span>
+                      <span>{cat.name}</span>
+                      <span className="filter-pill__count">{cat.count}</span>
+                    </button>
+                  )
+                })
+              )}
+            </div>
+          </div>
+        </div>
       </div>
-    </div>
+
+      <FilterSheet
+        isOpen={sheetOpen}
+        onClose={() => setSheetOpen(false)}
+        totalChannelsCount={resultCount}
+        availableCountries={countries}
+        selectedCountry={filters.country}
+        onSelectCountry={filters.onCountry}
+        availableCategories={categoryOptions.map(({ id, name, count }) => ({ id, name, count }))}
+        selectedCategory={filters.category}
+        onSelectCategory={filters.onCategory}
+        availableLanguages={languages}
+        selectedLanguage={filters.language}
+        onSelectLanguage={filters.onLanguage}
+        availableQualities={qualities}
+        selectedQuality={filters.quality}
+        onSelectQuality={filters.onQuality}
+        showFavOnly={filters.favOnly}
+        onToggleFavOnly={filters.onToggleFav}
+        favCount={filters.favouriteIds.size}
+        onClearAll={filters.onClear}
+        hasActiveFilters={isFiltered}
+      />
+    </>
   )
 }
 
-interface FacetProps {
-  label: string
-  value: string | null
-  emptyLabel: string
-  options: { value: string; label: string }[]
-  onChange: (value: string | null) => void
-}
-
-/** Native select, so mobile and smart-TV browsers get their own pickers. */
-function FacetSelect({ label, value, emptyLabel, options, onChange }: FacetProps) {
-  return (
-    <label className="epg-toolbar__select-wrap">
-      <span className="visually-hidden">{label}</span>
-      <select
-        className={`epg-toolbar__select${value ? ' epg-toolbar__select--active' : ''}`}
-        value={value ?? ''}
-        onChange={(e) => onChange(e.target.value || null)}
-      >
-        <option value="">{emptyLabel}</option>
-        {options.map((o) => (
-          <option key={o.value} value={o.value}>
-            {o.label}
-          </option>
-        ))}
-      </select>
-      <span className="epg-toolbar__select-arrow" aria-hidden="true">▾</span>
-    </label>
-  )
-}
 

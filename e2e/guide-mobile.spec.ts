@@ -1,7 +1,12 @@
 import { test, expect } from '@playwright/test'
 import type { Page } from '@playwright/test'
 
-/** Opens the guide and waits until schedules have produced programme boxes. */
+/**
+ * Opens the guide and waits until schedules have produced programme boxes.
+ *
+ * Schedules arrive in waves, so the grid is only settled once its visible rows
+ * have stopped showing the no-schedule placeholder.
+ */
 async function openGuide(page: Page) {
   await page.goto('/guide')
   await expect(page.locator('.epg-guide__grid')).toBeVisible({ timeout: 90_000 })
@@ -12,6 +17,12 @@ async function openGuide(page: Page) {
       { timeout: 90_000, message: 'programme boxes never rendered' },
     )
     .toBeGreaterThan(0)
+  await expect
+    .poll(
+      () => page.evaluate(() => document.querySelectorAll('.epg-guide__no-prog').length),
+      { timeout: 90_000, message: 'rows never finished loading their schedules' },
+    )
+    .toBe(0)
 }
 
 test.describe('TV guide on mobile', () => {
