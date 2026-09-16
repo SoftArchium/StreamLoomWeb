@@ -31,6 +31,9 @@ interface Props {
 /** Rows rendered beyond the viewport on each side. */
 const OVERSCAN_PX = 320
 
+/** How far behind the clock the feed may lag before the grid re-anchors. */
+const STALE_THRESHOLD_MS = 30 * 60 * 1000
+
 /** Channels whose schedules are requested at once. */
 const FETCH_CONCURRENCY = 12
 
@@ -143,6 +146,32 @@ function currentViewportWidth(): number {
   return typeof window === 'undefined' ? 1440 : window.innerWidth
 }
 
+/**
+ * Per-channel schedule coverage, for the channels that have data.
+ *
+ * Returned as `{ earliestEnd, latestEnd }` rather than raw lists because the
+ * time axis only needs two facts about the data: where it stops for the
+ * earliest-finishing channel, and where it stops for the latest-finishing one.
+ * Anchoring within that band is what lets every row show its programmes.
+ */
+function channelCoverage(channelIds: string[]): { earliestEnd: number; latestEnd: number } | null {
+  let earliestEnd = Infinity
+  let latestEnd = 0
+  for (const id of channelIds) {
+    const programs = epgCache.get(id)
+    if (!programs || programs.length === 0) continue
+    let end = 0
+    for (const p of programs) {
+      const e = new Date(p.end_time).getTime()
+      if (Number.isFinite(e) && e > end) end = e
+    }
+    if (end <= 0) continue
+    if (end < earliestEnd) earliestEnd = end
+    if (end > latestEnd) latestEnd = end
+  }
+  return latestEnd > 0 ? { earliestEnd, latestEnd } : null
+}
+
 function guideMetricsFor(viewportWidth: number): { sidebar: number; rowHeight: number } {
   if (viewportWidth <= 480) return { sidebar: 104, rowHeight: 52 }
   if (viewportWidth <= 768) return { sidebar: 132, rowHeight: 56 }
@@ -171,10 +200,6 @@ export function EpgGuide({ channels, epgChannelIds, filters }: Props) {
     return () => clearInterval(timer)
   }, [])
 
-  const gridWindow = useMemo(() => buildGuideWindow(now), [now])
-  const marks = useMemo(() => hourMarks(gridWindow), [gridWindow])
-  const nowOffset = gridWindow.nowOffset
-
   // Translation state lives outside React; the version hook above re-renders on
   // change, so the local flag only needs to mirror the toggle.
 
@@ -187,6 +212,51 @@ export function EpgGuide({ channels, epgChannelIds, filters }: Props) {
     () => applyFilters(channels.filter((ch) => epgChannelIds.has(ch.id) && ch.stream), filters),
     [channels, epgChannelIds, filters],
   )
+
+  // Row window, derived from scroll position. Used both to virtualize rendering
+  // and to scope the time axis to the rows the viewer is actually looking at.
+  const firstRowForWindow = Math.max(0, Math.floor((scrollTop - OVERSCAN_PX) / rowHeight))
+  const lastRowForWindow = Math.min(
+    guideChannels.length,
+    Math.ceil((scrollTop + viewportH + OVERSCAN_PX) / rowHeight),
+  )
+
+  /**
+   * The shared time axis.
+   *
+   * Normally it shows "now" with an hour of history. This feed lags the present
+   * by days, and channels finish a few hours apart, so when the data is stale the
+   * window is placed to cover that spread: it starts shortly before the
+   * earliest-finishing channel and runs forward past the latest-finishing one.
+   * Any anchor outside that band leaves rows at one end with nothing to draw,
+   * which is what made the guide look broken.
+   *
+   * The span stays one screen-and-a-bit wide: stretching it across a multi-day
+   * backlog would trade an empty grid for an unreadable one.
+   */
+  const gridWindow = useMemo(() => {
+    const ids = guideChannels.slice(firstRowForWindow, lastRowForWindow).map((c) => c.id)
+    const scope = ids.length > 0 ? ids : guideChannels.map((c) => c.id)
+    const coverage = channelCoverage(scope)
+
+    if (!coverage || coverage.latestEnd >= now.getTime() - STALE_THRESHOLD_MS) {
+      return buildGuideWindow(now)
+    }
+
+    // Anchor the window at the earliest channel's final programme, rounded down
+    // to the half hour. Simple and predictable: the left edge is the oldest point
+    // at which every channel still has data, so no row is empty and no row's
+    // content is pushed under the channel column.
+    const step = 30 * 60 * 1000
+    const origin = Math.floor(coverage.earliestEnd / step) * step
+    return buildGuideWindow(new Date(origin), true, undefined, 0)
+    // `cacheTick` re-runs this when a new wave of schedules lands.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [now, cacheTick, guideChannels, firstRowForWindow, lastRowForWindow])
+
+  const marks = useMemo(() => hourMarks(gridWindow), [gridWindow])
+  const nowOffset = gridWindow.nowOffset
+  const isStale = gridWindow.stale
 
   // Ids only: the prefetch effect must not restart when the search text changes
   // but the matching set is identical.
@@ -207,17 +277,12 @@ export function EpgGuide({ channels, epgChannelIds, filters }: Props) {
 
   // Vertical virtualization: only rows intersecting the viewport are rendered.
   const totalHeight = guideChannels.length * rowHeight
-  const firstRow = Math.max(0, Math.floor((scrollTop - OVERSCAN_PX) / rowHeight))
-  const lastRow = Math.min(
-    guideChannels.length,
-    Math.ceil((scrollTop + viewportH + OVERSCAN_PX) / rowHeight),
-  )
   const visibleRows = useMemo(
-    () => guideChannels.slice(firstRow, lastRow),
+    () => guideChannels.slice(firstRowForWindow, lastRowForWindow),
     // `cacheTick` is the re-render trigger for schedules arriving; the slice
     // itself only depends on the row window.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [guideChannels, firstRow, lastRow, cacheTick],
+    [guideChannels, firstRowForWindow, lastRowForWindow, cacheTick],
   )
 
   const handleScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
@@ -295,6 +360,16 @@ export function EpgGuide({ channels, epgChannelIds, filters }: Props) {
         onScrollToNow={scrollToNow}
       />
 
+      {isStale && (
+        <div className="epg-guide__stale" role="status">
+          <span aria-hidden="true">⚠</span>
+          Showing the latest published schedules ({new Date(
+            gridWindow.origin + gridWindow.anchorOffset * 60_000,
+          ).toLocaleDateString([], { month: 'short', day: 'numeric' })}) — today&apos;s guide has
+          not been published yet.
+        </div>
+      )}
+
       <div className="epg-guide__grid" ref={viewportRef} onScroll={handleScroll}>
         <EpgTimeline
           marks={marks}
@@ -315,9 +390,10 @@ export function EpgGuide({ channels, epgChannelIds, filters }: Props) {
                 programs={cachedEpg(ch.id) ?? EMPTY_PROGRAMS}
                 origin={gridWindow.origin}
                 nowOffset={nowOffset}
+                spanMinutes={gridWindow.span}
                 translate={translate}
                 sidebarWidth={sidebarWidth}
-                top={(firstRow + i) * rowHeight}
+                top={(firstRowForWindow + i) * rowHeight}
                 rowHeight={rowHeight}
                 onPick={handlePick}
               />
