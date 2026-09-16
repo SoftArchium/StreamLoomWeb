@@ -9,7 +9,7 @@
 | Feature | Details |
 |---|---|
 | 📺 Live TV | Thousands of channels via HLS.js, resolution-first stream selection, 5 Mbps fast-start buffer, resilient stream retries |
-| 📅 TV Guide (EPG) | Virtualized timeline grid anchored to now, channel search, faceted filters, one-click English translation of programme titles |
+| 📅 TV Guide (EPG) | Virtualized timeline grid that anchors to now (or to the published schedule when the feed lags), one-click English translation of programme titles, and the same filters as Home: search, category, country, language, resolution and favourites |
 | ❤️ Favourites | Pin channels with persistent local storage |
 | 🕘 Continue Watching | Auto-records recently watched channels |
 | 🎯 Mobile Filter Parity | Priority categories (Music 🎵, Movies 🎬, Cartoons 🦄, Comedy 😂, News 📰, Sports ⚽), Resolution filter (4K, FHD, HD, SD), and Country picker |

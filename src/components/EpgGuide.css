@@ -40,67 +40,19 @@
   flex-wrap: wrap;
 }
 
-.epg-toolbar__search {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex: 1 1 220px;
-  max-width: 420px;
-  height: 38px;
-  padding: 0 12px;
-  border-radius: var(--radius-full);
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  transition: border-color var(--duration-fast) ease;
-}
-
-.epg-toolbar__search:focus-within {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-glow);
-}
-
-.epg-toolbar__search-icon {
-  font-size: 17px;
-  color: var(--text-muted);
-  flex-shrink: 0;
-}
-
-.epg-toolbar__search-input {
-  flex: 1;
+/* SearchBar is reused verbatim from the Home screen; this slot only gives it
+   the flex sizing it gets there, so the rest of the row keeps its buttons. */
+.epg-toolbar__search-slot {
+  flex: 1 1 260px;
   min-width: 0;
-  background: none;
-  border: none;
-  outline: none;
-  font-size: 14px;
-  font-family: inherit;
-  color: var(--text-primary);
 }
 
-.epg-toolbar__search-input::placeholder { color: var(--text-muted); }
-.epg-toolbar__search-input::-webkit-search-cancel-button { display: none; }
-
-.epg-toolbar__clear {
+.epg-toolbar__hint {
+  font-size: 12px;
   color: var(--text-muted);
-  font-size: 13px;
-  padding: 2px 4px;
-  border-radius: var(--radius-sm);
+  padding: 4px 2px;
+  white-space: nowrap;
 }
-
-.epg-toolbar__clear:hover { color: var(--text-primary); }
-
-.epg-toolbar__kbd {
-  font-family: inherit;
-  font-size: 10px;
-  font-weight: 700;
-  color: var(--text-muted);
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  padding: 2px 5px;
-  flex-shrink: 0;
-}
-
-.epg-toolbar__search:focus-within .epg-toolbar__kbd { display: none; }
 
 .epg-toolbar__btn {
   display: inline-flex;
@@ -130,112 +82,6 @@
   border-color: var(--accent);
   color: var(--text-primary);
 }
-
-.epg-toolbar__badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 18px;
-  height: 18px;
-  padding: 0 5px;
-  border-radius: var(--radius-full);
-  background: var(--accent);
-  color: var(--text-on-accent);
-  font-size: 11px;
-  font-weight: 700;
-}
-
-/* Facet row: collapsible so the guide keeps vertical space on small screens. */
-.epg-toolbar__facets {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  max-height: 0;
-  opacity: 0;
-  overflow: hidden;
-  transition: max-height var(--duration-fast) ease, opacity var(--duration-fast) ease;
-}
-
-.epg-toolbar__facets--open {
-  max-height: 96px;
-  opacity: 1;
-}
-
-.epg-toolbar__select-wrap {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-}
-
-.epg-toolbar__select {
-  appearance: none;
-  height: 34px;
-  padding: 0 30px 0 14px;
-  border-radius: var(--radius-full);
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  color: var(--text-secondary);
-  font-size: 13px;
-  font-weight: 600;
-  font-family: inherit;
-  cursor: pointer;
-  max-width: 240px;
-  text-overflow: ellipsis;
-}
-
-.epg-toolbar__select:hover { background: var(--bg-card-hover); color: var(--text-primary); }
-
-.epg-toolbar__select--active {
-  border-color: var(--accent);
-  color: var(--text-primary);
-}
-
-.epg-toolbar__select option {
-  background: var(--bg-surface);
-  color: var(--text-primary);
-}
-
-.epg-toolbar__select-arrow {
-  position: absolute;
-  right: 12px;
-  font-size: 9px;
-  color: var(--text-muted);
-  pointer-events: none;
-}
-
-.epg-toolbar__chip {
-  height: 34px;
-  padding: 0 16px;
-  border-radius: var(--radius-full);
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  color: var(--text-secondary);
-  font-size: 13px;
-  font-weight: 600;
-  font-family: inherit;
-  white-space: nowrap;
-}
-
-.epg-toolbar__chip:hover { background: var(--bg-card-hover); color: var(--text-primary); }
-
-.epg-toolbar__chip--active {
-  border-color: #ef4444;
-  color: #ef4444;
-  background: color-mix(in srgb, #ef4444 14%, transparent);
-}
-
-.epg-toolbar__reset {
-  height: 34px;
-  padding: 0 14px;
-  border-radius: var(--radius-full);
-  color: var(--accent);
-  font-size: 13px;
-  font-weight: 700;
-  font-family: inherit;
-}
-
-.epg-toolbar__reset:hover { text-decoration: underline; }
 
 /* ---------- Grid: the one and only scroll container ---------- */
 
@@ -566,7 +412,6 @@
   .epg-toolbar { padding: 10px var(--space-md); }
   .epg-toolbar__count { display: none; }
   .epg-toolbar__btn { padding: 0 12px; font-size: 12px; }
-  .epg-toolbar__facets--open { max-height: 180px; }
 }
 
 @media (max-width: 480px) {
@@ -577,10 +422,7 @@
 
 /* Respect the OS "reduce motion" setting: the guide is a moving surface. */
 @media (prefers-reduced-motion: reduce) {
-  .epg-toolbar__facets,
-  .epg-toolbar__search,
-  .epg-toolbar__btn,
-  .epg-toolbar__chip { transition: none; }
+  .epg-toolbar__btn { transition: none; }
 }
 
 
