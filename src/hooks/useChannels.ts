@@ -17,11 +17,14 @@ import type {
   CatalogueWorkerResponse,
 } from '../workers/catalogue.worker'
 import {
+  fetchEdgeVerifiedStreams,
   getBrokenSet,
   getWorkingMapSnapshot,
   isHideBrokenStreamsEnabled,
   onStreamStateChange,
+  unmarkStreamBroken,
 } from '../util/stream'
+import { resetIconResolution } from '../util/iconResolver'
 
 export type { EnrichedChannel }
 
@@ -192,6 +195,80 @@ async function loadData(force = false) {
 
 // Kick off loading as soon as this module is first imported
 loadData()
+
+/**
+ * How often the catalogue, schedules and dead-stream list are re-read.
+ *
+ * Four hours keeps a long-lived tab (a TV browser session can stay open all day)
+ * within one refresh of the sync worker, without polling Redis in the meantime.
+ */
+const REFRESH_INTERVAL_MS = 4 * 60 * 60 * 1000
+
+/** Drops cached schedules and icon lookups so the next refresh re-reads them. */
+function invalidateEphemeralCaches() {
+  _epgCache.clear()
+  resetIconResolution()
+}
+
+let _refreshTimer: ReturnType<typeof setInterval> | null = null
+
+/** Cap on channels re-probed per tick, so a large broken set cannot stall. */
+const REVALIDATE_LIMIT = 50
+
+/**
+ * Re-probes channels marked dead and clears the ones that respond again.
+ *
+ * Streams die and recover on their own schedule, so a channel marked broken
+ * earlier is not necessarily broken now. Candidate URLs come from the loaded
+ * catalogue rather than the working-stream cache, which is what makes this work
+ * for channels that were marked broken before a working stream was ever cached.
+ *
+ * Best-effort and bounded: a failure leaves the channel marked broken, and only
+ * the first REVALIDATE_LIMIT channels are checked per tick.
+ */
+async function revalidateBrokenStreams() {
+  if (!_channels) return
+  const broken = [...getBrokenSet()]
+  if (broken.length === 0) return
+
+  const byId = new Map(_channels.map((c) => [c.id, c]))
+  const targets = broken
+    .map((id) => byId.get(id))
+    .filter((c): c is EnrichedChannel => Boolean(c && c.streams.length > 0))
+    .slice(0, REVALIDATE_LIMIT)
+
+  for (const channel of targets) {
+    try {
+      const result = await fetchEdgeVerifiedStreams(
+        channel.id,
+        channel.streams.map((s) => s.url),
+        channel.streams.map((s) => s.quality),
+        5000,
+      )
+      if (result?.workingStream) unmarkStreamBroken(channel.id)
+    } catch {
+      // Leave the channel marked broken.
+    }
+  }
+}
+
+/**
+ * Starts the periodic refresh.
+ *
+ * Guarded so the timer exists once per module load even though `useChannels` is
+ * called from every page. Each tick re-reads the catalogue, clears the schedule
+ * and icon caches, and re-probes streams that were previously marked dead.
+ */
+function startRefreshLoop() {
+  if (_refreshTimer) return
+  _refreshTimer = setInterval(() => {
+    invalidateEphemeralCaches()
+    loadData(true).catch(() => {})
+    revalidateBrokenStreams().catch(() => {})
+  }, REFRESH_INTERVAL_MS)
+}
+
+startRefreshLoop()
 
 export function useChannels(): UseChannelsResult {
   const [, setTick] = useState(0)

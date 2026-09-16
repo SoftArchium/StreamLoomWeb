@@ -1,6 +1,7 @@
-import { memo, useMemo } from 'react'
+import { memo, useEffect, useMemo, useState } from 'react'
 import type { EnrichedChannel, EpgProgram } from '../api/types'
-import { LOGO_SIZE, logoUrl, handleLogoError } from '../util/logo'
+import { LOGO_SIZE, logoUrl, handleLogoError, logoDataAttrs } from '../util/logo'
+import { onIconResolved, scheduleIconBackfill } from '../util/iconResolver'
 import { PIXELS_PER_MINUTE, offsetMinutes } from '../util/epgTime'
 import { EpgProgramBox } from './EpgProgramBox'
 
@@ -45,7 +46,22 @@ export const EpgRow = memo(function EpgRow({
   top,
   onPick,
 }: Props) {
-  const logoSrc = logoUrl(channel.logo)
+  const logoSrc = logoUrl(channel.logo, channel.id)
+
+  // Repaints this row when its own icon lands. Subscribing here rather than once
+  // in the guide is what makes it work at all: rows are memoized, so a guide-level
+  // re-render with identical props would never reach one.
+  const [, setIconTick] = useState(0)
+
+  // Only rendered rows reach here, and the grid virtualizes to the viewport, so
+  // this covers on-screen channels that have no icon at all. A 404 on the CDN
+  // icon is queued from onError instead, so a working icon costs no lookup.
+  useEffect(() => {
+    if (!channel.logo?.trim()) scheduleIconBackfill(channel.id, channel.name, channel.country)
+    return onIconResolved((resolvedId) => {
+      if (resolvedId === channel.id) setIconTick((t) => t + 1)
+    })
+  }, [channel.id, channel.name, channel.country, channel.logo])
   // Visible span in minutes from the grid origin. Programmes overlapping this
   // range are rendered; anything wholly outside it is skipped rather than laid
   // out off-screen.
@@ -134,6 +150,7 @@ export const EpgRow = memo(function EpgRow({
             loading="lazy"
             onError={handleLogoError}
             className="epg-guide__channel-logo"
+            {...logoDataAttrs(channel.id, channel.name, channel.country)}
           />
         ) : (
           <span className="epg-guide__channel-initials">
