@@ -18,6 +18,7 @@ import type {
 } from '../workers/catalogue.worker'
 import {
   fetchEdgeVerifiedStreams,
+  fetchKnownStreams,
   getBrokenSet,
   getWorkingMapSnapshot,
   isHideBrokenStreamsEnabled,
@@ -239,6 +240,17 @@ async function revalidateBrokenStreams() {
 
   for (const channel of targets) {
     try {
+      // Cheap fast-path: any POP that has verified this channel within the
+      // global R2 record's TTL wins. This avoids a per-channel probe when
+      // the answer is already known globally.
+      const known = await fetchKnownStreams(channel.id)
+      if (known?.workingStream) {
+        unmarkStreamBroken(channel.id)
+        continue
+      }
+
+      // Fallback: live probe via the per-POP `/api/streams` endpoint, which
+      // itself populates the global R2 record on success.
       const result = await fetchEdgeVerifiedStreams(
         channel.id,
         channel.streams.map((s) => s.url),

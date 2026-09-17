@@ -1,14 +1,24 @@
 /**
  * Cloudflare Pages Function: /api/streams
- * 
- * Auto-filters dead stream candidates and caches verified working streams
- * per Cloudflare edge POP / data center using the Cloudflare Cache API (caches.default).
- * 
- * Features:
- * - Edge POP isolation: results are cached close to the user's geographic location.
- * - Fast synchronous probe on candidate 1 (and candidate 2 on failure) with 2.5s Range request.
- * - Background async probe via context.waitUntil() for remaining candidates to avoid blocking client.
- * - Auto-populates working stream cache with a 2-hour TTL.
+ *
+ * Probes candidate stream URLs via short Range requests and publishes the
+ * verified working + dead list to two layers:
+ *
+ * 1. `caches.default` — per-edge-POP short-lived cache (2 h TTL) so a swarm
+ *    of visitors on the same POP never re-probes.
+ * 2. `ICONS_BUCKET` R2 — globally geo-replicated key-value store under
+ *    `stream-verify/<channelId>.json`. Every POP can read this so the
+ *    cross-colo inconsistency where channel X "works" for one user and not
+ *    another is removed. The companion endpoint at
+ *    `/api/streams/known/:channelId` exposes this record.
+ *
+ * The probe itself still runs synchronously on the first candidate (and the
+ * second if the first fails) so the request returns within ~5 s of the user
+ * tapping a channel. The remaining candidates are probed in the background
+ * via `context.waitUntil()` and the result is published to R2.
+ *
+ * Honesty: a stream that is "live" from one POP can still be geo-fenced for
+ * a different POP, so verification is best-effort, not a guarantee.
  */
 
 interface EdgeStreamsPayload {
@@ -19,6 +29,9 @@ interface EdgeStreamsPayload {
   edgeNode: string
   timestamp: number
 }
+
+/** TTL the global R2 record advertises to clients. */
+const GLOBAL_TTL_MS = 6 * 60 * 60 * 1000 // 6 hours
 
 /** Higher score wins. Unknown resolutions rank lowest so named ones always win. */
 function rankResolution(quality: string | null | undefined): number {
@@ -81,6 +94,40 @@ async function probeStreamEndpoint(url: string, timeoutMs = 2500): Promise<boole
 export const onRequest: PagesFunction = async (context) => {
   const { request } = context
   const urlObj = new URL(request.url)
+
+  // Global, geo-replicated verification store. Optional so the function still
+  // serves when the binding is absent; the per-POP `caches.default` path below
+  // is the only layer that degrades.
+  // @ts-ignore -- ICONS_BUCKET is provided by the Pages binding
+  const bucket = (context.env as { ICONS_BUCKET?: R2Bucket } | undefined)?.ICONS_BUCKET
+
+  /**
+   * Publishes a verification record to the global R2 store so any future
+   * visitor on any POP can read it from `/api/streams/known/:channelId`.
+   * Best-effort: a R2 outage must never break this endpoint.
+   */
+  const publishVerified = (working: string[], dead: string[]) => {
+    if (!bucket) return
+    if (channelId === 'unknown' || channelId === '') return
+    const body = JSON.stringify({
+      channelId,
+      workingStream: working[0] ?? null,
+      workingCandidates: working,
+      deadCandidates: dead,
+      verifiedAt: Date.now(),
+      ttlMs: GLOBAL_TTL_MS,
+    })
+    const job = bucket
+      .put(`stream-verify/${encodeURIComponent(channelId)}.json`, body, {
+        httpMetadata: { contentType: 'application/json; charset=utf-8' },
+      })
+      .catch(() => {
+        // R2 outages are non-fatal; the per-POP cache still serves.
+      })
+    if (typeof context.waitUntil === 'function') {
+      context.waitUntil(job)
+    }
+  }
 
   if (request.method === 'OPTIONS') {
     return new Response(null, {
@@ -216,6 +263,10 @@ export const onRequest: PagesFunction = async (context) => {
     }
   }
 
+  // Publish the synchronous-probe result to the global R2 store so visitors
+  // on a different edge POP do not re-probe and get a different answer.
+  publishVerified(workingCandidates, deadCandidates)
+
   // Background job to probe remaining candidates and populate edge cache
   const remainingCandidates = candidateUrls.filter(
     (u) => !workingCandidates.includes(u) && !deadCandidates.includes(u)
@@ -253,6 +304,10 @@ export const onRequest: PagesFunction = async (context) => {
         // Ignore cache storage errors
       }
     }
+
+    // Republish with the full set so the global store reflects the deeper
+    // probe result, not just the synchronous first/second pass.
+    publishVerified(payload.workingCandidates, payload.deadCandidates)
   }
 
   if (typeof context.waitUntil === 'function') {
