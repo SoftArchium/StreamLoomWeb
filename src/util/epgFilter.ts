@@ -1,5 +1,5 @@
 import type { EnrichedChannel } from '../api/types'
-import { getCountryName } from './country'
+import { matchesSearch, normalizeSearch } from './searchText'
 
 /**
  * Filter state for the TV guide toolbar.
@@ -75,16 +75,8 @@ export function activeFilterCount(f: GuideFilters): number {
   )
 }
 
-/** Lowercases and strips diacritics so "espana" matches "España". */
-function normalize(value: string): string {
-  return value
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-}
-
 /** Single predicate used by both the results and the facet counts. */
-function matches(ch: EnrichedChannel, f: GuideFilters, exclude: keyof GuideFilters | null): boolean {
+function matches(ch: EnrichedChannel, f: GuideFilters, exclude: keyof GuideFilters | null, normalizedQuery: string): boolean {
   if (f.favOnly && exclude !== 'favOnly' && !f.favouriteIds.has(ch.id)) return false
   if (f.country && exclude !== 'country' && ch.country !== f.country) return false
   if (f.language && exclude !== 'language' && !(ch.languages ?? []).includes(f.language)) return false
@@ -92,22 +84,15 @@ function matches(ch: EnrichedChannel, f: GuideFilters, exclude: keyof GuideFilte
   if (f.quality !== 'All Quality' && exclude !== 'quality' && !matchQuality(ch.stream?.quality, f.quality)) {
     return false
   }
-
-  const q = normalize(f.search.trim())
-  if (q && exclude !== 'search') {
-    const name = normalize(ch.name)
-    const code = normalize(ch.country ?? '')
-    if (!name.includes(q) && !code.includes(q) && !normalize(getCountryName(ch.country)).includes(q)) {
-      return false
-    }
-  }
+  if (exclude !== 'search' && !matchesSearch(ch, normalizedQuery)) return false
   return true
 }
 
 /** Applies every active filter to `channels`. */
 export function applyFilters(channels: EnrichedChannel[], f: GuideFilters): EnrichedChannel[] {
   if (!hasActiveFilters(f)) return channels
-  return channels.filter((ch) => matches(ch, f, null))
+  const normalizedQuery = normalizeSearch(f.search.trim())
+  return channels.filter((ch) => matches(ch, f, null, normalizedQuery))
 }
 
 export interface FacetOption {
@@ -130,9 +115,13 @@ export function facetCounts(
 ): Map<string, number> {
   const counts = new Map<string, number>()
   const bump = (key: string) => counts.set(key, (counts.get(key) ?? 0) + 1)
+  const normalizedQuery = normalizeSearch(f.search.trim())
+  // `facet` is excluded from itself; the search term is part of "every other
+  // filter", so it is kept active here.
+  const exclude: keyof GuideFilters = facet === 'quality' ? 'quality' : facet
 
   for (const ch of channels) {
-    if (!matches(ch, f, facet === 'quality' ? 'quality' : facet)) continue
+    if (!matches(ch, f, exclude, normalizedQuery)) continue
     if (facet === 'country') {
       if (ch.country) bump(ch.country)
     } else if (facet === 'language') {
