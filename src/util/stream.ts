@@ -227,6 +227,56 @@ export interface EdgeStreamCheckResult {
 }
 
 /**
+ * Global verification record (the same shape `fetchEdgeVerifiedStreams`
+ * returns, minus the per-POP `edgeNode` field) plus the TTL the server
+ * advertised when it published the record. `verifiedAt` is the server's
+ * wall-clock timestamp at publish time.
+ */
+export interface KnownStreamVerification {
+  channelId: string
+  workingStream: string | null
+  workingCandidates: string[]
+  deadCandidates: string[]
+  verifiedAt: number
+  ttlMs: number
+}
+
+/**
+ * Reads the global stream-verification record for a channel from the
+ * edge-published R2 store. Returns `null` when no record exists, when the
+ * record is older than `ttlMs`, or on any transport error — the caller
+ * falls back to a live probe in all three cases.
+ *
+ * The R2 store is geo-replicated by Cloudflare, so any POP that reads this
+ * sees the same answer — eliminating the cross-POP inconsistency where a
+ * channel "works" for one user and not another. The freshness check is
+ * done client-side because R2 has no native TTL primitive.
+ */
+export async function fetchKnownStreams(
+  channelId: string,
+  timeoutMs = 1500,
+): Promise<KnownStreamVerification | null> {
+  if (!channelId) return null
+  try {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), timeoutMs)
+    const res = await fetch(`/api/streams/known/${encodeURIComponent(channelId)}`, {
+      method: 'GET',
+      signal: controller.signal,
+    })
+    clearTimeout(timer)
+    if (res.status === 304 || res.status === 404) return null
+    if (!res.ok) return null
+    const data = (await res.json()) as KnownStreamVerification
+    if (!data || typeof data.verifiedAt !== 'number' || typeof data.ttlMs !== 'number') return null
+    if (Date.now() - data.verifiedAt > data.ttlMs) return null
+    return data
+  } catch {
+    return null
+  }
+}
+
+/**
  * Probes candidate stream URLs via edge node (/api/streams)
  * Returns pre-filtered working and dead stream candidates.
  *
