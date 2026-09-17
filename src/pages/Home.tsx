@@ -10,6 +10,7 @@ import { FilterSheet } from '../components/FilterSheet'
 import { useKeyboardNav } from '../hooks/useKeyboardNav'
 import { getCountryName, getCountryFlag, formatCountryDisplay } from '../util/country'
 import { getLanguageName } from '../util/language'
+import { matchesSearch, normalizeSearch } from '../util/searchText'
 import './Home.css'
 
 const PRIORITY_CATEGORIES = ['music', 'movies', 'cartoons', 'comedy', 'news', 'sports']
@@ -100,14 +101,12 @@ export function Home() {
       if (selectedQuality !== 'All Quality' && exclude !== 'quality') {
         list = list.filter((ch) => matchQuality(ch.stream?.quality, selectedQuality))
       }
-      const q = search.trim().toLowerCase()
-      if (q) {
-        list = list.filter(
-          (ch) =>
-            ch.name.toLowerCase().includes(q) ||
-            (ch.country ?? '').toLowerCase().includes(q) ||
-            getCountryName(ch.country).toLowerCase().includes(q),
-        )
+      // Normalize the query once per call instead of per channel; the per-channel
+      // haystack is built and memoized in `searchText.ts`, so each keystroke costs
+      // one `String.includes` per channel rather than an `Intl.DisplayNames.of()`.
+      const normalizedQuery = normalizeSearch(search.trim())
+      if (normalizedQuery) {
+        list = list.filter((ch) => matchesSearch(ch, normalizedQuery))
       }
       return list
     },

@@ -3,6 +3,7 @@ import { Link, useLocation } from 'react-router-dom'
 import { useChannels, useFavourites, useRecent } from '../hooks/useChannels'
 import { ChannelCard } from '../components/ChannelCard'
 import { SearchBar } from '../components/SearchBar'
+import { matchesSearch, normalizeSearch } from '../util/searchText'
 import './Favorites.css'
 
 export function Favorites() {
@@ -20,13 +21,9 @@ export function Favorites() {
   )
 
   const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase()
-    if (!q) return favChannels
-    return favChannels.filter(
-      (c) =>
-        c.name.toLowerCase().includes(q) ||
-        (c.country ?? '').toLowerCase().includes(q)
-    )
+    const normalizedQuery = normalizeSearch(search.trim())
+    if (!normalizedQuery) return favChannels
+    return favChannels.filter((ch) => matchesSearch(ch, normalizedQuery))
   }, [favChannels, search])
 
   const filteredPlaylist = useMemo(() => filtered.map((c) => c.id), [filtered])
