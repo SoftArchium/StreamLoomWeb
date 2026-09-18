@@ -76,7 +76,9 @@ export const onRequest: PagesFunction = async (context) => {
 
   // Binding is optional so the site still serves if it is unset.
   // @ts-ignore -- ICONS_BUCKET is provided by the Pages binding
-  const bucket = (context.env as { ICONS_BUCKET?: R2Bucket } | undefined)?.ICONS_BUCKET
+  const bucket = (context.env as { ICONS_BUCKET?: unknown } | undefined)?.ICONS_BUCKET as
+    | { put: (k: string, v: string, opts?: { httpMetadata?: { contentType?: string } }) => Promise<unknown> }
+    | undefined
   if (!bucket) {
     return new Response('Icon storage is not configured', { status: 503, headers: corsHeaders() })
   }

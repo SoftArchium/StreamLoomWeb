@@ -99,7 +99,9 @@ export const onRequest: PagesFunction = async (context) => {
   // serves when the binding is absent; the per-POP `caches.default` path below
   // is the only layer that degrades.
   // @ts-ignore -- ICONS_BUCKET is provided by the Pages binding
-  const bucket = (context.env as { ICONS_BUCKET?: R2Bucket } | undefined)?.ICONS_BUCKET
+  const bucket = (context.env as { ICONS_BUCKET?: unknown } | undefined)?.ICONS_BUCKET as
+    | { put: (k: string, v: string, opts?: { httpMetadata?: { contentType?: string } }) => Promise<unknown> }
+    | undefined
 
   /**
    * Publishes a verification record to the global R2 store so any future
