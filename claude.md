@@ -42,7 +42,7 @@ npm run preview      # Preview production build locally
 ## Architectural Overview
 
 ```
-StreamLoomWeb/
+streamloom-web/
 ├── functions/api/proxy.ts    # Cloudflare Pages Edge Function for M3U8 rewriting & CORS proxying
 ├── public/
 │   ├── _headers              # Cloudflare Pages security & caching headers

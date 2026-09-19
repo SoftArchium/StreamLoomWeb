@@ -13,7 +13,7 @@ StreamLoom Web is a progressive web application (PWA) built for streaming thousa
 ## 2. Directory Layout
 
 ```
-StreamLoomWeb/
+streamloom-web/
 ├── functions/
 │   └── api/
 │       └── proxy.ts           # Cloudflare Pages Function: M3U8 rewrite & CORS proxy
