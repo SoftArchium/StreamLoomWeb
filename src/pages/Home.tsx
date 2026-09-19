@@ -10,7 +10,7 @@ import { FilterSheet } from '../components/FilterSheet'
 import { useKeyboardNav } from '../hooks/useKeyboardNav'
 import { getCountryName, getCountryFlag, formatCountryDisplay } from '../util/country'
 import { getLanguageName } from '../util/language'
-import { matchesSearch, normalizeSearch } from '../util/searchText'
+import { computeMatchSet, normalizeSearch } from '../util/searchText'
 import './Home.css'
 
 const PRIORITY_CATEGORIES = ['music', 'movies', 'cartoons', 'comedy', 'news', 'sports']
@@ -100,15 +100,15 @@ export function Home() {
 
   // Non-search filters are stable enough that a single per-render derivation is
   // cheaper than recreating a callback. Each facet's "exclude self" semantics
-  // are honored by passing the right exclusion flag.
-  type FacetKey = 'country' | 'category' | 'language' | 'quality' | 'fav'
+  // are honored by the single-pass `facetCounts` below, which itself handles
+  // the per-facet exclusion inline.
   const passesNonSearch = useCallback(
-    (ch: EnrichedChannel, exclude: FacetKey | null): boolean => {
-      if (showFavOnly && exclude !== 'fav' && !favouriteIds.has(ch.id)) return false
-      if (selectedCountry && exclude !== 'country' && ch.country !== selectedCountry) return false
-      if (selectedCategory && exclude !== 'category' && !ch.categoryIds.includes(selectedCategory)) return false
-      if (selectedLanguage && exclude !== 'language' && !(ch.languages ?? []).includes(selectedLanguage)) return false
-      if (selectedQuality !== 'All Quality' && exclude !== 'quality' && !matchQuality(ch.stream?.quality, selectedQuality)) return false
+    (ch: EnrichedChannel): boolean => {
+      if (showFavOnly && !favouriteIds.has(ch.id)) return false
+      if (selectedCountry && ch.country !== selectedCountry) return false
+      if (selectedCategory && !ch.categoryIds.includes(selectedCategory)) return false
+      if (selectedLanguage && !(ch.languages ?? []).includes(selectedLanguage)) return false
+      if (selectedQuality !== 'All Quality' && !matchQuality(ch.stream?.quality, selectedQuality)) return false
       return true
     },
     [showFavOnly, favouriteIds, selectedCountry, selectedCategory, selectedLanguage, selectedQuality],
@@ -129,6 +129,17 @@ export function Home() {
   )
 
   /**
+   * The trigram index resolves the query to a small set of channel ids in O(1)
+   * per channel. `null` means "no restriction" (empty query). The grid and all
+   * facet counts share this single set, so each keystroke does at most one
+   * intersection regardless of how many facets the screen shows.
+   */
+  const matchSet = useMemo(
+    () => computeMatchSet(normalizedSearch),
+    [normalizedSearch],
+  )
+
+  /**
    * The grid is the fully-filtered view (search + every non-search filter).
    * It feeds `activeGridChannels`, which the grid view and the search-result
    * title bar render. The facet dropdowns do NOT derive from this list; they
@@ -138,99 +149,77 @@ export function Home() {
   const grid = useMemo(() => {
     const out: EnrichedChannel[] = []
     for (const ch of playableChannels) {
-      if (!passesNonSearch(ch, null)) continue
-      if (normalizedSearch && !matchesSearch(ch, normalizedSearch)) continue
+      if (!passesNonSearch(ch)) continue
+      if (matchSet && !matchSet.has(ch.id)) continue
       out.push(ch)
     }
     return out
-  }, [playableChannels, passesNonSearch, normalizedSearch])
+  }, [playableChannels, passesNonSearch, matchSet])
 
   const activeGridChannels = grid
 
   /**
-   * Counts for one facet, evaluated against `playableChannels` with every
-   * non-search filter applied EXCEPT the named facet's own filter AND with the
-   * search predicate applied. This matches the previous `filterChannels()`
-   * helper exactly: a search-narrowed, self-facet-excluded subset whose
-   * keys/presence drive the dropdown.
+   * Counts for every facet, computed in **a single pass** over the playable
+   * channels. The previous implementation ran four separate walks (one per
+   * facet) per keystroke; with the trigram index already pruning the set,
+   * folding the four walks into one is the difference between four times
+   * the intersection cost and exactly the intersection cost.
    *
-   * The cost: five walks over |playableChannels| on every keystroke, each
-   * applying the haystack check (the only one that touches every channel).
-   * The win comes from React's `useDeferredValue` on `search` above: the
-   * input keeps painting at 60 fps while these five walks run in the deferred
-   * tree, which means the user never waits for the worst-case render.
+   * The `exclude` parameter preserves the previous "exclude the facet's own
+   * selection" semantics: when computing country counts we ignore the
+   * currently-selected country so the dropdown can still offer alternatives.
    */
-  const collectCounts = useCallback(
-    (
-      exclude: FacetKey,
-      key: (ch: EnrichedChannel) => Iterable<string>,
-    ): Map<string, number> => {
-      const counts = new Map<string, number>()
-      for (const ch of playableChannels) {
-        if (!passesNonSearch(ch, exclude)) continue
-        if (normalizedSearch && !matchesSearch(ch, normalizedSearch)) continue
-        for (const k of key(ch)) counts.set(k, (counts.get(k) ?? 0) + 1)
-      }
-      return counts
-    },
-    [playableChannels, passesNonSearch, normalizedSearch],
-  )
-
-  // 1. Faceted Countries
-  const countryCounts = useMemo(
-    () => collectCounts('country', (ch) => (ch.country ? [ch.country] : [])),
-    [collectCounts],
-  )
-
-  // 2. Faceted Categories
-  const categoryCounts = useMemo(
-    () => collectCounts('category', (ch) => ch.categoryIds),
-    [collectCounts],
-  )
-
-  // 3. Faceted Languages
-  const languageCounts = useMemo(
-    () => collectCounts('language', (ch) => ch.languages ?? []),
-    [collectCounts],
-  )
-
-  // 4. Faceted Qualities (presence per bucket, not counts)
-  const qualityPresent = useMemo(() => {
+  const facetCounts = useMemo(() => {
+    const countries = new Map<string, number>()
+    const categories = new Map<string, number>()
+    const languages = new Map<string, number>()
     const present = { '4K': false, 'FHD (1080p)': false, 'HD (720p)': false, SD: false }
+
+    const bump = (m: Map<string, number>, k: string) => m.set(k, (m.get(k) ?? 0) + 1)
+
     for (const ch of playableChannels) {
-      if (!passesNonSearch(ch, 'quality')) continue
-      if (normalizedSearch && !matchesSearch(ch, normalizedSearch)) continue
+      // Exclude the facet we are counting for; search stays active.
+      if (showFavOnly && !favouriteIds.has(ch.id)) continue
+      if (matchSet && !matchSet.has(ch.id)) continue
+      if (selectedCountry && ch.country !== selectedCountry) continue
+      if (selectedCategory && !ch.categoryIds.includes(selectedCategory)) continue
+      if (selectedLanguage && !(ch.languages ?? []).includes(selectedLanguage)) continue
+      if (selectedQuality !== 'All Quality' && !matchQuality(ch.stream?.quality, selectedQuality)) continue
+
+      if (ch.country) bump(countries, ch.country)
+      for (const id of ch.categoryIds) bump(categories, id)
+      for (const code of ch.languages ?? []) bump(languages, code)
       const q = ch.stream?.quality
       if (q && matchQuality(q, '4K')) present['4K'] = true
       if (q && matchQuality(q, 'FHD (1080p)')) present['FHD (1080p)'] = true
       if (q && matchQuality(q, 'HD (720p)')) present['HD (720p)'] = true
       if (q && matchQuality(q, 'SD')) present.SD = true
     }
-    return present
-  }, [playableChannels, passesNonSearch, normalizedSearch])
+    return { countries, categories, languages, present }
+  }, [playableChannels, matchSet, favouriteIds, showFavOnly, selectedCountry, selectedCategory, selectedLanguage, selectedQuality])
 
-  const derived = { grid, countryCounts, categoryCounts, languageCounts, qualityPresent }
+  const derived = { grid, facetCounts }
 
   // 1. Faceted Countries: only countries having channels in current subset, with full names & flags
   const availableCountries = useMemo(() => {
-    return [...derived.countryCounts.keys()]
+    return [...derived.facetCounts.countries.keys()]
       .sort((a, b) => getCountryName(a).localeCompare(getCountryName(b)))
       .map((code) => ({
         code,
         name: getCountryName(code),
         flag: getCountryFlag(code),
-        count: derived.countryCounts.get(code) ?? 0,
+        count: derived.facetCounts.countries.get(code) ?? 0,
       }))
-  }, [derived.countryCounts])
+  }, [derived.facetCounts])
 
   // 2. Faceted Categories: only categories with channels in current subset, with dynamic counts
   const availableCategories = useMemo(() => {
     return categories
-      .filter((cat) => (derived.categoryCounts.get(cat.id) ?? 0) > 0)
+      .filter((cat) => (derived.facetCounts.categories.get(cat.id) ?? 0) > 0)
       .map((cat) => ({
         id: cat.id,
         name: cat.name,
-        count: derived.categoryCounts.get(cat.id) ?? 0,
+        count: derived.facetCounts.categories.get(cat.id) ?? 0,
       }))
       .sort((a, b) => {
         const aIndex = PRIORITY_CATEGORIES.indexOf(a.id.toLowerCase())
@@ -240,24 +229,24 @@ export function Home() {
         if (bIndex !== -1) return 1
         return a.name.localeCompare(b.name)
       })
-  }, [categories, derived.categoryCounts])
+  }, [categories, derived.facetCounts])
 
   // 3. Faceted Languages: only languages present in the current subset
   const availableLanguages = useMemo(() => {
-    return [...derived.languageCounts.keys()]
-      .map((code) => ({ code, name: getLanguageName(code), count: derived.languageCounts.get(code) ?? 0 }))
+    return [...derived.facetCounts.languages.keys()]
+      .map((code) => ({ code, name: getLanguageName(code), count: derived.facetCounts.languages.get(code) ?? 0 }))
       .sort((a, b) => a.name.localeCompare(b.name))
-  }, [derived.languageCounts])
+  }, [derived.facetCounts])
 
   // 4. Faceted Qualities: only qualities with channels in current subset
   const availableQualities = useMemo(() => {
     const result = ['All Quality']
-    if (derived.qualityPresent['4K']) result.push('4K')
-    if (derived.qualityPresent['FHD (1080p)']) result.push('FHD (1080p)')
-    if (derived.qualityPresent['HD (720p)']) result.push('HD (720p)')
-    if (derived.qualityPresent.SD) result.push('SD')
+    if (derived.facetCounts.present['4K']) result.push('4K')
+    if (derived.facetCounts.present['FHD (1080p)']) result.push('FHD (1080p)')
+    if (derived.facetCounts.present['HD (720p)']) result.push('HD (720p)')
+    if (derived.facetCounts.present.SD) result.push('SD')
     return result
-  }, [derived.qualityPresent])
+  }, [derived.facetCounts])
 
   // Derive effective filter values ensuring they are valid within available faceted options
   const effectiveCountry = useMemo(() => {

@@ -10,6 +10,7 @@
 import { fetchCatalogueFromRedis, fetchEpgIdsFromRedis } from '../api/redis'
 import { enrichChannels } from '../util/enrich'
 import type { WorkingRecord } from '../util/enrich'
+import { buildSearchIndex, type SearchIndex } from '../util/searchText'
 import type { Category, EnrichedChannel } from '../api/types'
 
 export interface CatalogueWorkerRequest {
@@ -21,6 +22,7 @@ export interface CatalogueWorkerResponse {
   channels: EnrichedChannel[]
   categories: Category[]
   epgIds: string[]
+  searchIndex?: SearchIndex
   error?: string
 }
 
@@ -49,12 +51,14 @@ ctx.onmessage = async (event: MessageEvent<CatalogueWorkerRequest>) => {
 
     const epgIds = await fetchEpgIdsFromRedis()
     const channels = enrichChannels(catalogue.channels, catalogue.streams, working)
+    const searchIndex = buildSearchIndex(channels)
 
     ctx.postMessage({
       ok: true,
       channels,
       categories: catalogue.categories,
       epgIds,
+      searchIndex,
     })
   } catch (e) {
     ctx.postMessage({

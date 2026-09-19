@@ -1,5 +1,4 @@
 import type { EnrichedChannel } from '../api/types'
-import { matchesSearch, normalizeSearch } from './searchText'
 
 /**
  * Filter state for the TV guide toolbar.
@@ -75,62 +74,193 @@ export function activeFilterCount(f: GuideFilters): number {
   )
 }
 
-/** Single predicate used by both the results and the facet counts. */
-function matches(ch: EnrichedChannel, f: GuideFilters, exclude: keyof GuideFilters | null, normalizedQuery: string): boolean {
-  if (f.favOnly && exclude !== 'favOnly' && !f.favouriteIds.has(ch.id)) return false
-  if (f.country && exclude !== 'country' && ch.country !== f.country) return false
-  if (f.language && exclude !== 'language' && !(ch.languages ?? []).includes(f.language)) return false
-  if (f.category && exclude !== 'category' && !ch.categoryIds.includes(f.category)) return false
-  if (f.quality !== 'All Quality' && exclude !== 'quality' && !matchQuality(ch.stream?.quality, f.quality)) {
-    return false
-  }
-  if (exclude !== 'search' && !matchesSearch(ch, normalizedQuery)) return false
-  return true
-}
-
-/** Applies every active filter to `channels`. */
-export function applyFilters(channels: EnrichedChannel[], f: GuideFilters): EnrichedChannel[] {
+/**
+ * Applies every active filter to `channels`. Mirrors the inline branch logic
+ * in `facetBundle` so the cost stays predictable.
+ */
+export function applyFilters(
+  channels: EnrichedChannel[],
+  f: GuideFilters,
+  matchSet: Set<string> | null,
+): EnrichedChannel[] {
   if (!hasActiveFilters(f)) return channels
-  const normalizedQuery = normalizeSearch(f.search.trim())
-  return channels.filter((ch) => matches(ch, f, null, normalizedQuery))
+  const wantFav = f.favOnly
+  const wantCountry = f.country
+  const wantLanguage = f.language
+  const wantCategory = f.category
+  const wantQuality = f.quality !== 'All Quality'
+  const qualityFilter = f.quality
+  const favourites = f.favouriteIds
+  const searchOn = matchSet !== null
+
+  const out: EnrichedChannel[] = []
+  for (const ch of channels) {
+    if (searchOn && !matchSet!.has(ch.id)) continue
+    if (wantFav && !favourites.has(ch.id)) continue
+    if (wantCountry && ch.country !== wantCountry) continue
+    if (wantLanguage && !(ch.languages ?? []).includes(wantLanguage)) continue
+    if (wantCategory && !ch.categoryIds.includes(wantCategory)) continue
+    if (wantQuality && !matchQuality(ch.stream?.quality, qualityFilter)) continue
+    out.push(ch)
+  }
+  return out
 }
 
-export interface FacetOption {
-  value: string
-  label: string
-  count: number
+/** Result of a single-pass facet computation over the channel set. */
+export interface FacetBundle {
+  country: Map<string, number>
+  language: Map<string, number>
+  category: Map<string, number>
+  quality: Map<string, number>
+}
+
+const bump = (m: Map<string, number>, k: string) => m.set(k, (m.get(k) ?? 0) + 1)
+
+/**
+ * Computes counts for every facet in **a single walk** over `channels`.
+ *
+ * Replaces the previous four-walk-per-keystroke implementation that ran
+ * `facetCounts(scope, filters, X)` once per facet. The match set and the
+ * "exclude the facet's own selection" rule are honored inline per-facet
+ * without re-running the full predicate four times — each row runs the
+ * non-search checks once and the search check once.
+ */
+export function facetBundle(
+  channels: EnrichedChannel[],
+  f: GuideFilters,
+  matchSet: Set<string> | null,
+): FacetBundle {
+  const country = new Map<string, number>()
+  const language = new Map<string, number>()
+  const category = new Map<string, number>()
+  const quality = new Map<string, number>()
+
+  // Snapshot the filter state once so the loop stays branch-light.
+  const wantFav = f.favOnly
+  const wantCountry = f.country
+  const wantLanguage = f.language
+  const wantCategory = f.category
+  const wantQuality = f.quality !== 'All Quality'
+  const qualityFilter = f.quality
+  const favourites = f.favouriteIds
+  const searchOn = matchSet !== null
+
+  for (const ch of channels) {
+    // Hard prerequisites: same on every facet, so fail-fast.
+    if (searchOn && !matchSet!.has(ch.id)) continue
+    if (wantFav && !favourites.has(ch.id)) continue
+
+    const chCountry = ch.country
+    const chLanguages = ch.languages ?? []
+    const chCategoryIds = ch.categoryIds
+    const chQuality = ch.stream?.quality
+
+    // Country facet: every other filter applies, except the country filter itself.
+    if (
+      (!wantFav || favourites.has(ch.id)) &&
+      (!wantLanguage || chLanguages.includes(wantLanguage)) &&
+      (!wantCategory || chCategoryIds.includes(wantCategory)) &&
+      (!wantQuality || matchQuality(chQuality, qualityFilter)) &&
+      chCountry
+    ) {
+      bump(country, chCountry)
+    }
+
+    // Language facet: every other filter applies, except the language filter itself.
+    if (chLanguages.length > 0) {
+      if (
+        (!wantFav || favourites.has(ch.id)) &&
+        (!wantCountry || chCountry === wantCountry) &&
+        (!wantCategory || chCategoryIds.includes(wantCategory)) &&
+        (!wantQuality || matchQuality(chQuality, qualityFilter))
+      ) {
+        for (const code of chLanguages) bump(language, code)
+      }
+    }
+
+    // Category facet: every other filter applies, except the category filter itself.
+    if (chCategoryIds.length > 0) {
+      if (
+        (!wantFav || favourites.has(ch.id)) &&
+        (!wantCountry || chCountry === wantCountry) &&
+        (!wantLanguage || chLanguages.includes(wantLanguage)) &&
+        (!wantQuality || matchQuality(chQuality, qualityFilter))
+      ) {
+        for (const id of chCategoryIds) bump(category, id)
+      }
+    }
+
+    // Quality facet: every other filter applies, except the quality filter itself.
+    if (chQuality) {
+      if (
+        (!wantFav || favourites.has(ch.id)) &&
+        (!wantCountry || chCountry === wantCountry) &&
+        (!wantLanguage || chLanguages.includes(wantLanguage)) &&
+        (!wantCategory || chCategoryIds.includes(wantCategory))
+      ) {
+        for (const bucket of ['4K', 'FHD (1080p)', 'HD (720p)', 'SD']) {
+          if (matchQuality(chQuality, bucket)) bump(quality, bucket)
+        }
+      }
+    }
+  }
+  return { country, language, category, quality }
 }
 
 /**
  * Counts for one facet, computed against every *other* active filter.
  *
- * This is what keeps the dropdowns honest: choosing "News" still shows how many
- * Spanish, English or Hindi news channels there are rather than collapsing the
- * counts to the current selection.
+ * @deprecated Prefer `facetBundle` — it computes every facet in one walk.
+ * Kept exported for any external consumer (none in-tree today); internally
+ * each call still walks `channels` once, so a UI that calls this four times
+ * pays four walks. New code should use `facetBundle`.
  */
 export function facetCounts(
   channels: EnrichedChannel[],
   f: GuideFilters,
   facet: 'country' | 'language' | 'category' | 'quality',
+  matchSet: Set<string> | null,
 ): Map<string, number> {
   const counts = new Map<string, number>()
-  const bump = (key: string) => counts.set(key, (counts.get(key) ?? 0) + 1)
-  const normalizedQuery = normalizeSearch(f.search.trim())
-  // `facet` is excluded from itself; the search term is part of "every other
-  // filter", so it is kept active here.
-  const exclude: keyof GuideFilters = facet === 'quality' ? 'quality' : facet
+  const wantFav = f.favOnly
+  const wantCountry = f.country
+  const wantLanguage = f.language
+  const wantCategory = f.category
+  const wantQuality = f.quality !== 'All Quality'
+  const qualityFilter = f.quality
+  const favourites = f.favouriteIds
+  const searchOn = matchSet !== null
 
   for (const ch of channels) {
-    if (!matches(ch, f, exclude, normalizedQuery)) continue
+    if (searchOn && !matchSet!.has(ch.id)) continue
     if (facet === 'country') {
-      if (ch.country) bump(ch.country)
+      if (wantFav && !favourites.has(ch.id)) continue
+      if (wantLanguage && !(ch.languages ?? []).includes(wantLanguage)) continue
+      if (wantCategory && !ch.categoryIds.includes(wantCategory)) continue
+      if (wantQuality && !matchQuality(ch.stream?.quality, qualityFilter)) continue
+      if (ch.country) counts.set(ch.country, (counts.get(ch.country) ?? 0) + 1)
     } else if (facet === 'language') {
-      for (const code of ch.languages ?? []) bump(code)
+      if (wantFav && !favourites.has(ch.id)) continue
+      if (wantCountry && ch.country !== wantCountry) continue
+      if (wantCategory && !ch.categoryIds.includes(wantCategory)) continue
+      if (wantQuality && !matchQuality(ch.stream?.quality, qualityFilter)) continue
+      for (const code of ch.languages ?? []) counts.set(code, (counts.get(code) ?? 0) + 1)
     } else if (facet === 'category') {
-      for (const id of ch.categoryIds) bump(id)
+      if (wantFav && !favourites.has(ch.id)) continue
+      if (wantCountry && ch.country !== wantCountry) continue
+      if (wantLanguage && !(ch.languages ?? []).includes(wantLanguage)) continue
+      if (wantQuality && !matchQuality(ch.stream?.quality, qualityFilter)) continue
+      for (const id of ch.categoryIds) counts.set(id, (counts.get(id) ?? 0) + 1)
     } else {
-      for (const bucket of ['4K', 'FHD (1080p)', 'HD (720p)', 'SD']) {
-        if (matchQuality(ch.stream?.quality, bucket)) bump(bucket)
+      if (wantFav && !favourites.has(ch.id)) continue
+      if (wantCountry && ch.country !== wantCountry) continue
+      if (wantLanguage && !(ch.languages ?? []).includes(wantLanguage)) continue
+      if (wantCategory && !ch.categoryIds.includes(wantCategory)) continue
+      const q = ch.stream?.quality
+      if (q) {
+        for (const bucket of ['4K', 'FHD (1080p)', 'HD (720p)', 'SD']) {
+          if (matchQuality(q, bucket)) counts.set(bucket, (counts.get(bucket) ?? 0) + 1)
+        }
       }
     }
   }

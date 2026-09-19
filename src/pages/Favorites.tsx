@@ -1,9 +1,9 @@
-import { useMemo, useState, useEffect } from 'react'
+import { useDeferredValue, useMemo, useState, useEffect } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { useChannels, useFavourites, useRecent } from '../hooks/useChannels'
 import { ChannelCard } from '../components/ChannelCard'
 import { SearchBar } from '../components/SearchBar'
-import { matchesSearch, normalizeSearch } from '../util/searchText'
+import { computeMatchSet, normalizeSearch } from '../util/searchText'
 import './Favorites.css'
 
 export function Favorites() {
@@ -20,11 +20,17 @@ export function Favorites() {
     [playableChannels, favouriteIds]
   )
 
+  /**
+   * Mirror Home/Guide: the input drives `search` synchronously (so the result
+   * count stays live), but the actual filter pass reads from `deferredSearch`
+   * so even a 40k-row set cannot stall the input.
+   */
+  const deferredSearch = useDeferredValue(search)
   const filtered = useMemo(() => {
-    const normalizedQuery = normalizeSearch(search.trim())
-    if (!normalizedQuery) return favChannels
-    return favChannels.filter((ch) => matchesSearch(ch, normalizedQuery))
-  }, [favChannels, search])
+    const matchSet = computeMatchSet(normalizeSearch(deferredSearch.trim()))
+    if (!matchSet) return favChannels
+    return favChannels.filter((ch) => matchSet.has(ch.id))
+  }, [favChannels, deferredSearch])
 
   const filteredPlaylist = useMemo(() => filtered.map((c) => c.id), [filtered])
 

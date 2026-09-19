@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useDeferredValue, useEffect, useMemo, useState } from 'react'
 import { useChannels, useFavourites } from '../hooks/useChannels'
 import { EpgGuide } from '../components/EpgGuide'
 import type { GuideFilters, GuideFilterState } from '../util/epgFilter'
 import { EMPTY_FILTER_STATE } from '../util/epgFilter'
+import { computeMatchSet, normalizeSearch } from '../util/searchText'
 import './Guide.css'
 
 /** Filter state survives navigating to the player and back. */
@@ -77,6 +78,17 @@ export function Guide() {
     [channels, epgChannelIds],
   )
 
+  /**
+   * Mirror Home's deferral pattern: the search input updates `state.search`
+   * synchronously, but the heavy filter work reads from `deferredSearch` so
+   * the input never stalls even when a 40k-row filter pass is in flight.
+   */
+  const deferredSearch = useDeferredValue(state.search)
+  const matchSet = useMemo(
+    () => computeMatchSet(normalizeSearch(deferredSearch.trim())),
+    [deferredSearch],
+  )
+
   return (
     <div className="guide-page">
       <div className="guide-page__header">
@@ -104,6 +116,7 @@ export function Guide() {
           categories={categories}
           epgChannelIds={epgChannelIds}
           filters={filters}
+          matchSet={matchSet}
         />
       )}
     </div>

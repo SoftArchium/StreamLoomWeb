@@ -27,6 +27,13 @@ interface Props {
   categories: Category[]
   epgChannelIds: Set<string>
   filters: GuideFilters
+  /**
+   * Pre-resolved set of channel ids matching the current search query, or
+   * `null` when there is no search restriction. Pre-computed once per
+   * keystroke by the Guide page and threaded through so every filter pass
+   * below can membership-test in O(1) instead of re-scanning.
+   */
+  matchSet: Set<string> | null
 }
 
 /** Rows rendered beyond the viewport on each side. */
@@ -179,7 +186,7 @@ function guideMetricsFor(viewportWidth: number): { sidebar: number; rowHeight: n
   return { sidebar: SIDEBAR_WIDTH, rowHeight: ROW_HEIGHT }
 }
 
-export function EpgGuide({ channels, categories, epgChannelIds, filters }: Props) {
+export function EpgGuide({ channels, categories, epgChannelIds, filters, matchSet }: Props) {
   const navigate = useNavigate()
   const viewportRef = useRef<HTMLDivElement>(null)
   const rafRef = useRef(0)
@@ -210,8 +217,8 @@ export function EpgGuide({ channels, categories, epgChannelIds, filters }: Props
 
   // Guide channels: have a schedule key, are playable, and pass the toolbar.
   const guideChannels = useMemo(
-    () => applyFilters(channels.filter((ch) => epgChannelIds.has(ch.id) && ch.stream), filters),
-    [channels, epgChannelIds, filters],
+    () => applyFilters(channels.filter((ch) => epgChannelIds.has(ch.id) && ch.stream), filters, matchSet),
+    [channels, epgChannelIds, filters, matchSet],
   )
 
   // Row window, derived from scroll position. Used both to virtualize rendering

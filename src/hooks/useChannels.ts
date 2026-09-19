@@ -7,6 +7,7 @@ import {
   isUpstashConfigured,
 } from '../api/redis'
 import { enrichChannels } from '../util/enrich'
+import { buildSearchIndex, setSearchIndex as installSearchIndex, type SearchIndex } from '../util/searchText'
 import {
   clearStoredCatalogue,
   readStoredCatalogue,
@@ -45,6 +46,8 @@ interface CatalogueLoad {
   channels: EnrichedChannel[]
   categories: Category[]
   epgIds: string[]
+  /** Optional prebuilt trigram index (worker path only). */
+  searchIndex?: SearchIndex
 }
 
 // Module-level in-memory state (shared across all hook instances)
@@ -102,7 +105,12 @@ function loadInWorker(): Promise<CatalogueLoad | null | undefined> {
     worker.onmessage = (event: MessageEvent<CatalogueWorkerResponse>) => {
       const data = event.data
       if (data && data.ok) {
-        finish({ channels: data.channels, categories: data.categories, epgIds: data.epgIds })
+        finish({
+          channels: data.channels,
+          categories: data.categories,
+          epgIds: data.epgIds,
+          searchIndex: data.searchIndex,
+        })
       } else {
         finish(null)
       }
@@ -140,6 +148,9 @@ function applyLoad(load: CatalogueLoad, source: 'redis' | 'cache') {
   _source = source
   _loading = false
   _error = null
+  // Install the search index (worker path) or build one on the main thread.
+  const index = load.searchIndex ?? buildSearchIndex(load.channels)
+  installSearchIndex(index)
 }
 
 async function loadData(force = false) {
@@ -155,6 +166,9 @@ async function loadData(force = false) {
       _source = 'cache'
       _loading = false
       _error = null
+      // Reuse the cache for the search index too; the background refresh
+      // below will rebuild and reinstall it.
+      installSearchIndex(buildSearchIndex(stored.channels))
       notify()
       loadData(true).catch(() => {})
       return

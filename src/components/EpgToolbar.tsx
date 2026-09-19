@@ -5,10 +5,11 @@ import { getLanguageName } from '../util/language'
 import type { LanguageOption } from '../util/language'
 import {
   activeFilterCount,
-  facetCounts,
+  facetBundle,
   hasActiveFilters,
 } from '../util/epgFilter'
 import type { GuideFilters } from '../util/epgFilter'
+import { computeMatchSet, normalizeSearch } from '../util/searchText'
 import { FilterSheet } from './FilterSheet'
 import { SearchBar } from './SearchBar'
 import '../pages/Home.css'
@@ -64,8 +65,25 @@ export function EpgToolbar({
   const [sheetOpen, setSheetOpen] = useState(false)
   const categoriesScrollRef = useRef<HTMLDivElement>(null)
 
+  /**
+   * Resolve the search query to a small set of channel ids exactly once per
+   * keystroke; every facet below reads from it instead of re-scanning the
+   * catalogue. `null` means "no search restriction" so the bundle runs every
+   * row through the same inline filter chain.
+   */
+  const matchSet = useMemo(
+    () => computeMatchSet(normalizeSearch(filters.search.trim())),
+    [filters.search],
+  )
+
+  /**
+   * One walk over `scope` produces every facet's count map. Replaces the
+   * previous four-walk-per-keystroke implementation.
+   */
+  const bundle = useMemo(() => facetBundle(scope, filters, matchSet), [scope, filters, matchSet])
+
   const countries = useMemo(() => {
-    const counts = facetCounts(scope, filters, 'country')
+    const counts = bundle.country
     return [...counts.keys()]
       .map((code) => ({
         code,
@@ -74,10 +92,10 @@ export function EpgToolbar({
         count: counts.get(code) ?? 0,
       }))
       .sort((a, b) => a.name.localeCompare(b.name))
-  }, [scope, filters])
+  }, [bundle])
 
   const categoryOptions = useMemo(() => {
-    const counts = facetCounts(scope, filters, 'category')
+    const counts = bundle.category
     return categories
       .filter((cat) => (counts.get(cat.id) ?? 0) > 0)
       .map((cat) => ({
@@ -94,20 +112,20 @@ export function EpgToolbar({
         if (bi !== -1) return 1
         return a.name.localeCompare(b.name)
       })
-  }, [categories, scope, filters])
+  }, [categories, bundle])
 
   const languages = useMemo<LanguageOption[]>(() => {
-    const counts = facetCounts(scope, filters, 'language')
+    const counts = bundle.language
     return [...counts.keys()]
       .map((code) => ({ code, name: getLanguageName(code), count: counts.get(code) ?? 0 }))
       .sort((a, b) => a.name.localeCompare(b.name))
-  }, [scope, filters])
+  }, [bundle])
 
   // Only offer resolutions that exist in the current subset, like Home does.
   const qualities = useMemo(() => {
-    const counts = facetCounts(scope, filters, 'quality')
+    const counts = bundle.quality
     return ['All Quality', ...QUALITY_OPTIONS.filter((q) => (counts.get(q) ?? 0) > 0)]
-  }, [scope, filters])
+  }, [bundle])
 
   // Wheel over the category track scrolls it horizontally, as on Home.
   useEffect(() => {
